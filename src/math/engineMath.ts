@@ -147,7 +147,7 @@ export function calculateMaxSafeMechanicalRpm(config: PistonEngineConfigInput): 
     strokeBasedRpm + (isDiesel ? componentRpmDelta * 0.42 : componentRpmDelta);
 
   return Math.min(
-    isDiesel ? 5800 : 11000,
+    isDiesel ? 5800 : 13000,
     Math.max(isDiesel ? 3600 : 4600, Math.round(rawMaxRpm / 100) * 100),
   );
 }
