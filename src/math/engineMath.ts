@@ -736,30 +736,7 @@ export function simulatePistonEngineDyno(
 
       const targetForcedPeakBmepBar = peakNaBmepBar * (1 + effectiveBoostGain);
 
-      if (config.turboType === 'ETurbo') {
-        const eTurboLowRamp =
-          0.85 + 0.15 * (1 - Math.exp(-Math.pow((rpm - 1000) / 680, 1.65)));
-        const avgAr =
-          activeTurboStagesAr.reduce((a, b) => a + b, 0) / activeTurboStagesAr.length;
-        const eTurboCrown = Math.max(
-          0.45,
-          1.0 -
-            Math.pow(
-              Math.max(0, rpm - 2500) /
-                (5600 + avgAr * 1800 + (turboCountSpec.turbineCount - 1) * 750),
-              1.9,
-            ) *
-              0.22,
-        );
-
-        currentBmepBar =
-          targetForcedPeakBmepBar *
-          eTurboLowRamp *
-          eTurboCrown *
-          lowMidRpmStrokeBonus *
-          highRpmChokeFactor *
-          archFlowModifier;
-      } else if (config.turboType === 'Supercharger') {
+      if (config.turboType === 'Supercharger') {
         const rootsRamp = 0.88 + 0.12 * Math.sin(Math.min(Math.PI / 2, (rpm - 1000) / 1600));
         const rootsParasiticRollOff =
           rpm > 3400 ? Math.pow((rpm - 3400) / 5200, 1.75) * 0.25 : 0;
@@ -771,7 +748,7 @@ export function simulatePistonEngineDyno(
           highRpmChokeFactor *
           archFlowModifier;
       } else {
-        // Calcolo combinato di ogni singola turbina in base al suo diametro/A/R individuale e al numero totale di turbine
+        // Calcolo combinato di ogni singola turbina (incluso E-Turbo!) in base al suo diametro/A/R individuale e al numero totale di turbine
         const bearingSpoolBonusRpm =
           config.turboBearingType === 'BallBearing' ? -360 : 0;
         const hotVSpoolBonusRpm = config.turboPosition === 'HotV' ? -240 : 0;
@@ -821,9 +798,18 @@ export function simulatePistonEngineDyno(
           activeTurboStagesAr.length >= 2 &&
           Math.max(...activeTurboStagesAr) - Math.min(...activeTurboStagesAr) >= 0.1;
 
-        const effectiveSpool = isAsymmetricStages
+        const exhaustDrivenSpool = isAsymmetricStages
           ? 0.72 * fastestStageSpool + 0.28 * avgStageSpool
           : 0.35 * fastestStageSpool + 0.65 * avgStageSpool;
+
+        // L'E-Turbo usa il motore elettrico coassiale per partire dall'85% già a 1000 rpm e raggiungere il 100% a ~2100 rpm
+        // azzerando il lag anche con giranti A/R enormi, mantenendo poi tutta la portata e il bonus Multi-Turbo agli alti giri!
+        const eTurboLowRamp =
+          0.85 + 0.15 * (1 - Math.exp(-Math.pow((rpm - 1000) / 680, 1.65)));
+        const effectiveSpool =
+          config.turboType === 'ETurbo'
+            ? Math.max(exhaustDrivenSpool, eTurboLowRamp)
+            : exhaustDrivenSpool;
 
         // Con più turbine o stadi asimmetrici, il mantenimento della pressione agli alti regimi migliora nettamente
         const multiStageHighBreathing = Math.min(
@@ -832,7 +818,10 @@ export function simulatePistonEngineDyno(
         );
 
         const minAr = Math.min(...activeTurboStagesAr);
-        const naturalBoostPeakRpm = 2800 + minAr * 1550;
+        const naturalBoostPeakRpm =
+          config.turboType === 'ETurbo'
+            ? 2600 + minAr * 950
+            : 2800 + minAr * 1550;
         const boostDomeCrown =
           0.95 +
           0.05 * Math.exp(-Math.pow((rpm - naturalBoostPeakRpm) / 2600, 2));
