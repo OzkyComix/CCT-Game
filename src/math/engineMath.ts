@@ -100,10 +100,10 @@ export function getActiveTurboStagesAr(config: PistonEngineConfigInput): number[
 }
 
 /**
- * Calcola il riferimento base di rotazione meccanica (scala originaria 11k)
- * usato per mantenere invariati i margini di affidabilità/usura ai regimi normali.
+ * Calcola il limite fisico meccanico massimo di rotazione (RPM di rottura)
+ * mantenendo la formula identica a prima ma alzando il tetto massimo da 11.000 a 13.000 rpm.
  */
-function calculateBaseMechanicalRpmReference(config: PistonEngineConfigInput): number {
+export function calculateMaxSafeMechanicalRpm(config: PistonEngineConfigInput): number {
   const blockSpec =
     BLOCK_MATERIALS.find((b) => b.id === config.blockMaterialId) ?? BLOCK_MATERIALS[0];
   const headSpec =
@@ -147,23 +147,9 @@ function calculateBaseMechanicalRpmReference(config: PistonEngineConfigInput): n
     strokeBasedRpm + (isDiesel ? componentRpmDelta * 0.42 : componentRpmDelta);
 
   return Math.min(
-    isDiesel ? 5800 : 11000,
+    isDiesel ? 5800 : 13000,
     Math.max(isDiesel ? 3600 : 4600, Math.round(rawMaxRpm / 100) * 100),
   );
-}
-
-/**
- * Calcola il limite fisico meccanico massimo di rotazione (RPM di rottura)
- * esteso fino a 13.000 rpm per i motori a ciclo Otto (includendo l'estensione +2.000 rpm
- * in modo che i propulsori raggiungano effettivamente i 13k rpm sul banco prova).
- */
-export function calculateMaxSafeMechanicalRpm(config: PistonEngineConfigInput): number {
-  const isDiesel = config.fuelType === 'Diesel';
-  const baseRefRpm = calculateBaseMechanicalRpmReference(config);
-  if (isDiesel) {
-    return baseRefRpm;
-  }
-  return Math.min(13000, baseRefRpm + 2000);
 }
 
 /**
@@ -1043,7 +1029,12 @@ export function simulatePistonEngineDyno(
     Corsa: -14.0,
   };
 
-  const baseRefMechanicalRpm = calculateBaseMechanicalRpmReference(config);
+  // Il riferimento di sicurezza rimane ancorato al vecchio tetto di 11.000 rpm (non vede i 13k come i vecchi 11k!):
+  // fino a 11k il comportamento è identico a prima, mentre spingersi tra 11k e 13k aumenta progressivamente lo stress.
+  const baseRefMechanicalRpm = Math.min(
+    isDiesel ? 5800 : 11000,
+    maxSafeMechanicalRpm,
+  );
   const rpmMarginRatio =
     (baseRefMechanicalRpm - redlineRpm) / Math.max(1, baseRefMechanicalRpm);
   const manualRpmReliabilityBonus = rpmMarginRatio * 24 - 1.5;

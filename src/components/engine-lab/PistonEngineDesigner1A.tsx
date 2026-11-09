@@ -539,7 +539,11 @@ export const PistonEngineDesigner1A: React.FC = () => {
   );
 
   const clampedManualRpm = Math.min(maxSafeMechanicalRpm, config.manualRedlineRpm);
-  const rpmSafetyBuffer = maxSafeMechanicalRpm - clampedManualRpm;
+  const safeRpmReference = Math.min(
+    config.fuelType === 'Diesel' ? 5800 : 11000,
+    maxSafeMechanicalRpm,
+  );
+  const rpmSafetyBuffer = safeRpmReference - clampedManualRpm;
 
   return (
     <div className="space-y-6">
@@ -1019,7 +1023,9 @@ export const PistonEngineDesigner1A: React.FC = () => {
                       ? `Margine Sicuro (-${rpmSafetyBuffer} rpm = +Vita km)`
                       : rpmSafetyBuffer >= 200
                         ? `Margine Sportivo (-${rpmSafetyBuffer} rpm)`
-                        : 'Al Limite Critico (-Affidabilità)'}
+                        : rpmSafetyBuffer < 0
+                          ? `Oltre Soglia 11k (+${Math.abs(rpmSafetyBuffer)} rpm = -Affidabilità)`
+                          : 'Al Limite Critico (-Affidabilità)'}
                   </span>
                 </div>
               </div>
