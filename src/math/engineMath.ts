@@ -100,10 +100,10 @@ export function getActiveTurboStagesAr(config: PistonEngineConfigInput): number[
 }
 
 /**
- * Calcola il limite fisico meccanico massimo di rotazione (RPM di rottura)
- * includendo i bonus/malus di architettura (Boxer +300 rpm, V +150 rpm, In Linea >6 cil -350 rpm).
+ * Calcola il riferimento base di rotazione meccanica (scala originaria 11k)
+ * usato per mantenere invariati i margini di affidabilità/usura ai regimi normali.
  */
-export function calculateMaxSafeMechanicalRpm(config: PistonEngineConfigInput): number {
+function calculateBaseMechanicalRpmReference(config: PistonEngineConfigInput): number {
   const blockSpec =
     BLOCK_MATERIALS.find((b) => b.id === config.blockMaterialId) ?? BLOCK_MATERIALS[0];
   const headSpec =
@@ -126,11 +126,11 @@ export function calculateMaxSafeMechanicalRpm(config: PistonEngineConfigInput): 
 
   let archRpmBonus = 0;
   if (config.architecture === 'Boxer') {
-    archRpmBonus = 300; // Equilibratura perfetta di 1° e 2° ordine
+    archRpmBonus = 300;
   } else if (config.architecture === 'V' && config.bankAngleDeg > 15) {
-    archRpmBonus = 150; // Albero motore corto e rigido
+    archRpmBonus = 150;
   } else if (config.architecture === 'Inline' && config.cylinders > 6) {
-    archRpmBonus = -350; // Elevata inerzia torsionale su albero lungo 8 cilindri in linea
+    archRpmBonus = -350;
   }
 
   const componentRpmDelta =
@@ -147,9 +147,23 @@ export function calculateMaxSafeMechanicalRpm(config: PistonEngineConfigInput): 
     strokeBasedRpm + (isDiesel ? componentRpmDelta * 0.42 : componentRpmDelta);
 
   return Math.min(
-    isDiesel ? 5800 : 13000,
+    isDiesel ? 5800 : 11000,
     Math.max(isDiesel ? 3600 : 4600, Math.round(rawMaxRpm / 100) * 100),
   );
+}
+
+/**
+ * Calcola il limite fisico meccanico massimo di rotazione (RPM di rottura)
+ * esteso fino a 13.000 rpm per i motori a ciclo Otto (includendo l'estensione +2.000 rpm
+ * in modo che i propulsori raggiungano effettivamente i 13k rpm sul banco prova).
+ */
+export function calculateMaxSafeMechanicalRpm(config: PistonEngineConfigInput): number {
+  const isDiesel = config.fuelType === 'Diesel';
+  const baseRefRpm = calculateBaseMechanicalRpmReference(config);
+  if (isDiesel) {
+    return baseRefRpm;
+  }
+  return Math.min(13000, baseRefRpm + 2000);
 }
 
 /**
@@ -741,14 +755,16 @@ export function simulatePistonEngineDyno(
           0.85 + 0.15 * (1 - Math.exp(-Math.pow((rpm - 1000) / 680, 1.65)));
         const avgAr =
           activeTurboStagesAr.reduce((a, b) => a + b, 0) / activeTurboStagesAr.length;
-        const eTurboCrown =
+        const eTurboCrown = Math.max(
+          0.45,
           1.0 -
-          Math.pow(
-            Math.max(0, rpm - 2500) /
-              (5600 + avgAr * 1800 + (turboCountSpec.turbineCount - 1) * 750),
-            1.9,
-          ) *
-            0.22;
+            Math.pow(
+              Math.max(0, rpm - 2500) /
+                (5600 + avgAr * 1800 + (turboCountSpec.turbineCount - 1) * 750),
+              1.9,
+            ) *
+              0.22,
+        );
 
         currentBmepBar =
           targetForcedPeakBmepBar *
@@ -764,7 +780,7 @@ export function simulatePistonEngineDyno(
 
         currentBmepBar =
           targetForcedPeakBmepBar *
-          (rootsRamp - rootsParasiticRollOff) *
+          Math.max(0.38, rootsRamp - rootsParasiticRollOff) *
           lowMidRpmStrokeBonus *
           highRpmChokeFactor *
           archFlowModifier;
@@ -1027,8 +1043,9 @@ export function simulatePistonEngineDyno(
     Corsa: -14.0,
   };
 
+  const baseRefMechanicalRpm = calculateBaseMechanicalRpmReference(config);
   const rpmMarginRatio =
-    (maxSafeMechanicalRpm - redlineRpm) / Math.max(1, maxSafeMechanicalRpm);
+    (baseRefMechanicalRpm - redlineRpm) / Math.max(1, baseRefMechanicalRpm);
   const manualRpmReliabilityBonus = rpmMarginRatio * 24 - 1.5;
   const manualRpmStressMultiplier = Math.max(0.7, 1.1 - rpmMarginRatio * 1.1);
 
