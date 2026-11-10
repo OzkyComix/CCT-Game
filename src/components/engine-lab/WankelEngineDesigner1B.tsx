@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
@@ -77,6 +77,7 @@ export const WankelEngineDesigner1B: React.FC<WankelEngineDesignerProps> = ({
     unlockedEnginePartIds,
     unlockEnginePart,
     saveEngineToDatabase,
+    setLiveWankelDraft,
   } = useGameStore();
 
   // Metadati Wankel
@@ -136,6 +137,45 @@ export const WankelEngineDesigner1B: React.FC<WankelEngineDesignerProps> = ({
 
   const costs = useMemo(() => calculateWankelCosts(config), [config]);
   const telemetry = useMemo(() => simulateWankelEngineDyno(config), [config]);
+
+  // Sincronizza la bozza live della Tab 1B con lo store per il test dei sistemi Ibridi nella Tab 1C
+  useEffect(() => {
+    setLiveWankelDraft({
+      id: 'live-wankel-1b',
+      sourceKind: 'LiveWankel1B',
+      name: `${engineName} (Tab 1B Live)`,
+      codeName: codeName || 'ROT-1B',
+      propulsionType: 'Wankel_1B',
+      architectureLabel: `${geometry.displacementLiters}L ${config.rotorCount}-Rotori Wankel (Equiv. ${(geometry.equivalentDisplacementCc / 1000).toFixed(1)}L)`,
+      displacementCc: geometry.totalDisplacementCc,
+      displacementLiters: geometry.displacementLiters,
+      cylindersOrRotors: config.rotorCount,
+      fuelType: config.fuelType,
+      isTurbo: config.turboType !== 'NaturallyAspirated',
+      peakPowerHp: telemetry.peakPowerHp,
+      peakPowerRpm: telemetry.peakPowerRpm,
+      peakTorqueNm: telemetry.peakTorqueNm,
+      peakTorqueRpm: telemetry.peakTorqueRpm,
+      redlineRpm: telemetry.redlineRpm,
+      dryWeightKg: telemetry.dryWeightKg,
+      wetWeightKg: telemetry.wetWeightKg,
+      dimensionsMm: geometry.dimensionsMm,
+      emissionsGPerKm: telemetry.emissionsGPerKm,
+      reliabilityPercent: telemetry.reliabilityPercent,
+      estimatedLifespanKm: telemetry.estimatedLifespanKm,
+      unitProductionCost: telemetry.unitProductionCost,
+      curve: telemetry.curve,
+    });
+  }, [
+    engineName,
+    codeName,
+    config.rotorCount,
+    config.fuelType,
+    config.turboType,
+    geometry,
+    telemetry,
+    setLiveWankelDraft,
+  ]);
 
   const chassisCompatibilityList = useMemo(
     () =>

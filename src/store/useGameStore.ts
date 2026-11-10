@@ -15,6 +15,7 @@ import {
 import {
   type ChassisEntity,
   type ComponentEntity,
+  type CoupledIceEngineOption,
   type DualCurrencyCost,
   type DualCurrencyResources,
   type EngineEntity,
@@ -56,6 +57,11 @@ export interface GameState {
   vehicles: VehicleEntity[];
   transactionLog: TransactionLogEntry[];
 
+  /** Bozza live del Motore a Pistoni attualmente configurato nella Tab 1A (per test Ibridi 1C) */
+  livePistonDraft: CoupledIceEngineOption;
+  /** Bozza live del Motore Wankel attualmente configurato nella Tab 1B (per test Ibridi 1C) */
+  liveWankelDraft: CoupledIceEngineOption;
+
   // Azioni Doppia Valuta & Gate di Validazione
   validateDualCurrencyGate: (cost: DualCurrencyCost) => DualCurrencyGateResult;
   spendDualCurrency: (actionName: string, cost: DualCurrencyCost) => DualCurrencyGateResult;
@@ -67,6 +73,8 @@ export interface GameState {
   unlockEnginePart: (partId: string, partName: string, cost: DualCurrencyCost) => DualCurrencyGateResult;
   saveEngineToDatabase: (engine: EngineEntity) => DualCurrencyGateResult;
   toggleEngineB2B: (engineId: string) => void;
+  setLivePistonDraft: (draft: CoupledIceEngineOption) => void;
+  setLiveWankelDraft: (draft: CoupledIceEngineOption) => void;
 
   // Azioni Database Modulare
   addCustomComponent: (params: {
@@ -590,6 +598,85 @@ export const useGameStore = create<GameState>((set, get) => ({
   chassisList: initialChassis,
   components: initialComponents,
   vehicles: initialVehicles,
+  livePistonDraft: {
+    id: 'live-piston-1a',
+    sourceKind: 'LivePiston1A',
+    name: '2.0L I4 16v Twin-Scroll Turbo (Tab 1A Live)',
+    codeName: 'PRJ-20T-1A',
+    propulsionType: 'Piston_1A',
+    architectureLabel: '2.0L 4 Cilindri in Linea Turbo',
+    displacementCc: 1998,
+    displacementLiters: 2.0,
+    cylindersOrRotors: 4,
+    fuelType: 'Benzina',
+    isTurbo: true,
+    peakPowerHp: 280,
+    peakPowerRpm: 5800,
+    peakTorqueNm: 400,
+    peakTorqueRpm: 2500,
+    redlineRpm: 6800,
+    dryWeightKg: 138,
+    wetWeightKg: 151,
+    dimensionsMm: { lengthMm: 470, widthMm: 585, heightMm: 625 },
+    emissionsGPerKm: 158,
+    reliabilityPercent: 86.5,
+    estimatedLifespanKm: 235_000,
+    unitProductionCost: 4_600,
+    curve: [
+      { rpm: 1000, torqueNm: 205, powerHp: 29 },
+      { rpm: 1500, torqueNm: 290, powerHp: 62 },
+      { rpm: 2000, torqueNm: 375, powerHp: 107 },
+      { rpm: 2500, torqueNm: 400, powerHp: 142 },
+      { rpm: 3000, torqueNm: 400, powerHp: 171 },
+      { rpm: 3500, torqueNm: 400, powerHp: 200 },
+      { rpm: 4000, torqueNm: 396, powerHp: 226 },
+      { rpm: 4500, torqueNm: 388, powerHp: 249 },
+      { rpm: 5000, torqueNm: 375, powerHp: 267 },
+      { rpm: 5500, torqueNm: 354, powerHp: 278 },
+      { rpm: 6000, torqueNm: 327, powerHp: 280 },
+      { rpm: 6500, torqueNm: 292, powerHp: 271 },
+      { rpm: 6800, torqueNm: 268, powerHp: 260 },
+    ],
+  },
+  liveWankelDraft: {
+    id: 'live-wankel-1b',
+    sourceKind: 'LiveWankel1B',
+    name: '1.3L Twin-Rotor Street-Port Sequential Biturbo (Tab 1B Live)',
+    codeName: 'ROT-13B-1B',
+    propulsionType: 'Wankel_1B',
+    architectureLabel: '1.3L 2-Rotori Wankel (Equiv. 2.6L)',
+    displacementCc: 1308,
+    displacementLiters: 1.3,
+    cylindersOrRotors: 2,
+    fuelType: 'Benzina',
+    isTurbo: true,
+    peakPowerHp: 335,
+    peakPowerRpm: 7600,
+    peakTorqueNm: 345,
+    peakTorqueRpm: 5400,
+    redlineRpm: 8500,
+    dryWeightKg: 112,
+    wetWeightKg: 124,
+    dimensionsMm: { lengthMm: 510, widthMm: 520, heightMm: 510 },
+    emissionsGPerKm: 215,
+    reliabilityPercent: 74.5,
+    estimatedLifespanKm: 92_000,
+    unitProductionCost: 6_450,
+    curve: [
+      { rpm: 1000, torqueNm: 185, powerHp: 26 },
+      { rpm: 2000, torqueNm: 235, powerHp: 67 },
+      { rpm: 3000, torqueNm: 285, powerHp: 122 },
+      { rpm: 4000, torqueNm: 322, powerHp: 183 },
+      { rpm: 5000, torqueNm: 342, powerHp: 243 },
+      { rpm: 5500, torqueNm: 345, powerHp: 270 },
+      { rpm: 6000, torqueNm: 342, powerHp: 292 },
+      { rpm: 6500, torqueNm: 336, powerHp: 311 },
+      { rpm: 7000, torqueNm: 328, powerHp: 327 },
+      { rpm: 7600, torqueNm: 310, powerHp: 335 },
+      { rpm: 8000, torqueNm: 292, powerHp: 333 },
+      { rpm: 8500, torqueNm: 268, powerHp: 324 },
+    ],
+  },
   transactionLog: [
     {
       id: 'tx-init-1',
@@ -728,6 +815,16 @@ export const useGameStore = create<GameState>((set, get) => ({
       engines: state.engines.map((e) =>
         e.id === engineId ? { ...e, b2bSaleEnabled: !e.b2bSaleEnabled } : e,
       ),
+    })),
+
+  setLivePistonDraft: (draft) =>
+    set(() => ({
+      livePistonDraft: draft,
+    })),
+
+  setLiveWankelDraft: (draft) =>
+    set(() => ({
+      liveWankelDraft: draft,
     })),
 
   addCustomComponent: (params) => {

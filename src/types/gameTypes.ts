@@ -282,9 +282,9 @@ export interface WankelEngineSpecs {
 }
 
 export type ElectricMotorType =
-  | 'PermanentMagnetSync'
   | 'InductionAsync'
-  | 'ElectricallyExcitedSync'
+  | 'PermanentMagnetSync'
+  | 'IPM_SynRM'
   | 'AxialFlux';
 
 export type MotorLayoutConfig =
@@ -300,13 +300,45 @@ export type ElectricCoolingSystem = 'Air' | 'LiquidGlycol' | 'DirectDielectric';
 
 export type InverterTech = 'Silicon_IGBT' | 'SiliconCarbide_SiC' | 'GalliumNitride_GaN';
 
-export type VoltageArchitecture = 400 | 800;
+export type VoltageArchitecture = 400 | 800 | 1000;
+
+/**
+ * Rappresenta un motore termico (Pistoni 1A o Wankel 1B) selezionabile per accoppiamento Ibrido
+ * (live dalle Tab 1A/1B, salvato nel database o di riferimento base).
+ */
+export interface CoupledIceEngineOption {
+  id: string;
+  sourceKind: 'LivePiston1A' | 'LiveWankel1B' | 'SavedDatabase' | 'ReferencePreset';
+  name: string;
+  codeName: string;
+  propulsionType: 'Piston_1A' | 'Wankel_1B';
+  architectureLabel: string;
+  displacementCc: number;
+  displacementLiters: number;
+  cylindersOrRotors: number;
+  fuelType: string;
+  isTurbo: boolean;
+  peakPowerHp: number;
+  peakPowerRpm: number;
+  peakTorqueNm: number;
+  peakTorqueRpm: number;
+  redlineRpm: number;
+  dryWeightKg: number;
+  wetWeightKg: number;
+  dimensionsMm: DimensionsLWH;
+  emissionsGPerKm: number;
+  reliabilityPercent: number;
+  estimatedLifespanKm: number;
+  unitProductionCost: number;
+  curve: DynoCurvePoint[];
+}
 
 export interface ElectricHybridSpecs {
   systemType: HybridSystemType;
   electricMotorType: ElectricMotorType;
   motorLayout: MotorLayoutConfig;
   motorCount: number;
+  hasFrontDisconnect?: boolean;
   statorDiameterMm: number;
   rotorLengthMm: number;
   batteryChemistry: BatteryChemistry;
@@ -314,10 +346,15 @@ export interface ElectricHybridSpecs {
   voltageArchitecture: VoltageArchitecture;
   coolingSystem: ElectricCoolingSystem;
   inverterTech: InverterTech;
+  inverterSummaryName?: string;
+  inverterEfficiencyPercent?: number;
   peakElectricPowerKw: number;
+  peakElectricPowerHp?: number;
   continuousPowerKw: number;
   peakTorqueNm: number;
+  cornerSpeedRpm?: number;
   maxRpm: number;
+  cRatePeak?: number;
   gearboxType: 'SingleSpeedDirect' | 'TwoSpeedDualClutch';
   gearRatio: number;
   batteryWeightKg: number;
@@ -325,30 +362,43 @@ export interface ElectricHybridSpecs {
   totalPowertrainWeightKg: number;
   estimatedRangeKm: number;
   efficiencyWhPerKm: number;
+  efficiencyKwhPer100Km?: number;
   batteryLifespanCycles: number;
   // Per topologie ibride (MHEV, FullHybrid, PHEV, RangeExtender)
+  coupledIceId?: string;
+  coupledIceName?: string;
+  coupledIcePropulsionType?: 'Piston_1A' | 'Wankel_1B';
   iceEngineDisplacementCc?: number;
   icePowerHp?: number;
   iceTorqueNm?: number;
   combinedPowerHp: number;
   combinedTorqueNm: number;
+  // Specifiche Range Extender (EREV)
+  erevGeneratorOutputKw?: number;
+  erevCruisingDemandKw?: number;
+  erevGeneratorRpm?: number;
+  erevSelfSustaining?: boolean;
+  erevTotalCombinedRangeKm?: number;
 }
 
 export interface ElectricHybridEngineConfigInput {
   systemType: HybridSystemType;
   electricMotorType: ElectricMotorType;
   motorLayout: MotorLayoutConfig;
-  statorDiameterMm: number; // 180 - 320 mm
-  rotorLengthMm: number; // 100 - 280 mm
+  hasFrontDisconnect?: boolean;
+  statorDiameterMm: number; // 150 - 340 mm
+  rotorLengthMm: number; // 80 - 280 mm
   batteryChemistry: BatteryChemistry;
-  batteryCapacityKwh: number; // 1.5 - 140 kWh
+  batteryCapacityKwh: number; // 1.0 - 150 kWh
   voltageArchitecture: VoltageArchitecture;
   coolingSystem: ElectricCoolingSystem;
   inverterTech: InverterTech;
   gearboxType: 'SingleSpeedDirect' | 'TwoSpeedDualClutch';
   gearRatio: number; // 6.5 - 13.5:1
-  maxMotorRpm: number; // 12000 - 22000 rpm
-  // Componente termica per ibridi
+  maxMotorRpm: number; // 14000 - 22000 rpm
+  // ID del motore termico/Wankel selezionato per i test ibridi
+  coupledIceOptionId?: string;
+  // Componente termica fallback
   iceArchitecture?: 'Inline' | 'V' | 'Boxer' | 'Wankel';
   iceCylindersOrRotors?: number;
   iceDisplacementCc?: number;

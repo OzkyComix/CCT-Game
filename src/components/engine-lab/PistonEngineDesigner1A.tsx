@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
@@ -90,6 +90,7 @@ export const PistonEngineDesigner1A: React.FC<PistonEngineDesigner1AProps> = ({
     unlockEnginePart,
     saveEngineToDatabase,
     toggleEngineB2B,
+    setLivePistonDraft,
   } = useGameStore();
 
   // Metadati motore
@@ -164,6 +165,46 @@ export const PistonEngineDesigner1A: React.FC<PistonEngineDesigner1AProps> = ({
 
   // Calcolo istantaneo telemetria Banco Prova (basata su BMEP reale)
   const telemetry = useMemo(() => simulatePistonEngineDyno(config), [config]);
+
+  // Sincronizza la bozza live della Tab 1A con lo store per il test dei sistemi Ibridi nella Tab 1C
+  useEffect(() => {
+    setLivePistonDraft({
+      id: 'live-piston-1a',
+      sourceKind: 'LivePiston1A',
+      name: `${engineName} (Tab 1A Live)`,
+      codeName: codeName || 'PRJ-1A',
+      propulsionType: 'Piston_1A',
+      architectureLabel: `${geometry.displacementLiters}L ${config.architecture}${config.cylinders} (${config.fuelType})`,
+      displacementCc: geometry.totalDisplacementCc,
+      displacementLiters: geometry.displacementLiters,
+      cylindersOrRotors: config.cylinders,
+      fuelType: config.fuelType,
+      isTurbo: config.turboType !== 'NaturallyAspirated',
+      peakPowerHp: telemetry.peakPowerHp,
+      peakPowerRpm: telemetry.peakPowerRpm,
+      peakTorqueNm: telemetry.peakTorqueNm,
+      peakTorqueRpm: telemetry.peakTorqueRpm,
+      redlineRpm: telemetry.redlineRpm,
+      dryWeightKg: telemetry.dryWeightKg,
+      wetWeightKg: telemetry.wetWeightKg,
+      dimensionsMm: geometry.dimensionsMm,
+      emissionsGPerKm: telemetry.emissionsGPerKm,
+      reliabilityPercent: telemetry.reliabilityPercent,
+      estimatedLifespanKm: telemetry.estimatedLifespanKm,
+      unitProductionCost: telemetry.unitProductionCost,
+      curve: telemetry.curve,
+    });
+  }, [
+    engineName,
+    codeName,
+    config.architecture,
+    config.cylinders,
+    config.fuelType,
+    config.turboType,
+    geometry,
+    telemetry,
+    setLivePistonDraft,
+  ]);
 
   // Verifica ingombro in tempo reale su tutti i Pianali aziendali
   const chassisCompatibilityList = useMemo(
