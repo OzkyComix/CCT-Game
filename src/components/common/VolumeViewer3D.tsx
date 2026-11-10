@@ -4,6 +4,10 @@ import {
   type PistonEngineConfigInput,
   getActiveTurboStagesAr,
 } from '../../math/engineMath';
+import {
+  type WankelEngineConfigInput,
+  getActiveWankelTurboStagesAr,
+} from '../../math/wankelMath';
 import type { DimensionsLWH } from '../../types/gameTypes';
 
 export interface OverlaidChassisBayItem {
@@ -20,8 +24,12 @@ interface VolumeViewer3DProps {
   engineInBayDimensionsMm: DimensionsLWH;
   /** Dimensioni native del motore lungo il suo albero (mm) */
   rawEngineDimensionsMm: DimensionsLWH;
-  /** Configurazione completa del motore 1A per generare il modello 3D procedurale */
-  engineConfig: PistonEngineConfigInput;
+  /** Configurazione opzionale del motore a pistoni 1A */
+  engineConfig?: PistonEngineConfigInput;
+  /** Configurazione opzionale del motore rotativo Wankel 1B */
+  wankelConfig?: WankelEngineConfigInput;
+  /** Tipo di propulsore per scegliere il modello procedurale ('Piston' | 'Wankel') */
+  engineType?: 'Piston' | 'Wankel';
   /** Lista di pianali selezionati con checkbox per la sovrapposizione simultanea 3D */
   overlaidChassisBays: OverlaidChassisBayItem[];
 }
@@ -292,10 +300,176 @@ function buildProceduralEngineMeshGroup(
   return engineRoot;
 }
 
+function buildProceduralWankelMeshGroup(
+  config: WankelEngineConfigInput,
+  rawDimsMm: DimensionsLWH,
+  anyCollision: boolean,
+): THREE.Group {
+  const root = new THREE.Group();
+  const W = rawDimsMm.widthMm / 1000;
+
+  const housingMat = new THREE.MeshStandardMaterial({
+    color: anyCollision ? 0xb91c1c : 0xa1a1aa,
+    roughness: 0.35,
+    metalness: 0.75,
+  });
+
+  const ironPlateMat = new THREE.MeshStandardMaterial({
+    color: anyCollision ? 0x991b1b : 0x334155,
+    roughness: 0.55,
+    metalness: 0.6,
+  });
+
+  const shaftMat = new THREE.MeshStandardMaterial({
+    color: 0x1e293b,
+    roughness: 0.5,
+    metalness: 0.8,
+  });
+
+  const intakeMat = new THREE.MeshStandardMaterial({
+    color: config.referenceClass === 'Corsa' ? 0xd97706 : 0x0284c7,
+    roughness: 0.3,
+    metalness: 0.6,
+  });
+
+  const turboHotMat = new THREE.MeshStandardMaterial({
+    color: 0x78350f,
+    roughness: 0.5,
+    metalness: 0.65,
+  });
+
+  const turboColdMat = new THREE.MeshStandardMaterial({
+    color: 0xe2e8f0,
+    roughness: 0.2,
+    metalness: 0.9,
+  });
+
+  // 1. Sandwich dei Rotori e delle Piastre Intermedie Wankel
+  const rotorThickness = config.rotorWidthMm / 1000;
+  const plateThickness = 0.022;
+  const R = config.generatingRadiusMm / 1000;
+  const e = config.eccentricityMm / 1000;
+
+  const totalSandwichLen =
+    config.rotorCount * rotorThickness + (config.rotorCount + 1) * plateThickness;
+  const startX = -totalSandwichLen / 2;
+
+  // Piastre fisse in ghisa (Front iron, intermediate iron, rear iron)
+  for (let i = 0; i <= config.rotorCount; i++) {
+    const xPos = startX + i * (rotorThickness + plateThickness) + plateThickness / 2;
+    const plateGeo = new THREE.BoxGeometry(plateThickness, (R + e) * 2.1, (R + e) * 2.05);
+    const plateMesh = new THREE.Mesh(plateGeo, ironPlateMat);
+    plateMesh.position.set(xPos, 0, 0);
+    root.add(plateMesh);
+  }
+
+  // Casse trocoidi dei rotori (Alluminio con profilo trocoide)
+  for (let i = 0; i < config.rotorCount; i++) {
+    const xPos =
+      startX + plateThickness + i * (rotorThickness + plateThickness) + rotorThickness / 2;
+    const trochoidGeo = new THREE.CylinderGeometry(
+      (R + e) * 0.96,
+      (R + e) * 0.96,
+      rotorThickness,
+      24,
+    );
+    trochoidGeo.rotateZ(Math.PI / 2);
+    const trochoidMesh = new THREE.Mesh(trochoidGeo, housingMat);
+    trochoidMesh.position.set(xPos, 0, 0);
+    root.add(trochoidMesh);
+
+    // Candele doppie per rotore sul fianco (Leading e Trailing)
+    const plugGeo = new THREE.CylinderGeometry(0.012, 0.012, 0.04, 12);
+    plugGeo.rotateX(Math.PI / 2);
+    const plug1 = new THREE.Mesh(plugGeo, shaftMat);
+    plug1.position.set(xPos, 0.045, (R + e) * 0.92);
+    const plug2 = new THREE.Mesh(plugGeo, shaftMat);
+    plug2.position.set(xPos, -0.045, (R + e) * 0.92);
+    root.add(plug1);
+    root.add(plug2);
+  }
+
+  // Albero eccentrico passante, puleggia anteriore (+X) e volano posteriore (-X)
+  const shaftGeo = new THREE.CylinderGeometry(0.042, 0.042, totalSandwichLen + 0.12, 16);
+  shaftGeo.rotateZ(Math.PI / 2);
+  const shaftMesh = new THREE.Mesh(shaftGeo, shaftMat);
+  shaftMesh.position.set(0, 0, 0);
+  root.add(shaftMesh);
+
+  const pulleyGeo = new THREE.CylinderGeometry(0.07, 0.07, 0.035, 20);
+  pulleyGeo.rotateZ(Math.PI / 2);
+  const pulleyMesh = new THREE.Mesh(pulleyGeo, shaftMat);
+  pulleyMesh.position.set(totalSandwichLen / 2 + 0.045, 0, 0);
+  root.add(pulleyMesh);
+
+  const flywheelGeo = new THREE.CylinderGeometry(0.145, 0.145, 0.038, 24);
+  flywheelGeo.rotateZ(Math.PI / 2);
+  const flywheelMesh = new THREE.Mesh(flywheelGeo, shaftMat);
+  flywheelMesh.position.set(-totalSandwichLen / 2 - 0.045, 0, 0);
+  root.add(flywheelMesh);
+
+  // 2. Collettore di Aspirazione Superiore
+  const intakeGeo = new THREE.BoxGeometry(totalSandwichLen * 0.88, 0.055, 0.16);
+  const intakeMesh = new THREE.Mesh(intakeGeo, intakeMat);
+  intakeMesh.position.set(0, (R + e) * 1.05 + 0.04, -0.05);
+  root.add(intakeMesh);
+
+  // 3. Coppa Olio Inferiore
+  const sumpGeo = new THREE.BoxGeometry(totalSandwichLen * 0.92, 0.075, (R + e) * 1.25);
+  const sumpMesh = new THREE.Mesh(sumpGeo, ironPlateMat);
+  sumpMesh.position.set(0, -(R + e) * 1.05 - 0.03, 0);
+  root.add(sumpMesh);
+
+  // 4. Turbocompressori Wankel
+  if (config.turboType !== 'NaturallyAspirated') {
+    const activeStages = getActiveWankelTurboStagesAr(config);
+    const count = activeStages.length;
+
+    const createWankelTurbo = (x: number, y: number, z: number, stageAr: number) => {
+      const radius = 0.036 + stageAr * 0.034;
+      const tGroup = new THREE.Group();
+
+      const hotGeo = new THREE.CylinderGeometry(radius, radius, 0.042, 18);
+      hotGeo.rotateZ(Math.PI / 2);
+      const hotMesh = new THREE.Mesh(hotGeo, turboHotMat);
+      tGroup.add(hotMesh);
+
+      const coldGeo = new THREE.CylinderGeometry(radius * 1.06, radius * 1.06, 0.042, 18);
+      coldGeo.rotateZ(Math.PI / 2);
+      const coldMesh = new THREE.Mesh(coldGeo, turboColdMat);
+      coldMesh.position.set(0.044, 0, 0);
+      tGroup.add(coldMesh);
+
+      tGroup.position.set(x, y, z);
+      root.add(tGroup);
+    };
+
+    if (config.turboPosition === 'Front') {
+      for (let i = 0; i < count; i++) {
+        const zOff = count === 1 ? 0 : (i / (count - 1) - 0.5) * (W * 0.52);
+        createWankelTurbo(totalSandwichLen / 2 + 0.065, -0.02, zOff, activeStages[i]);
+      }
+    } else {
+      for (let i = 0; i < count; i++) {
+        const xOff = count === 1 ? 0 : (i / (count - 1) - 0.5) * (totalSandwichLen * 0.65);
+        createWankelTurbo(xOff, 0.02, (R + e) * 1.12 + 0.05, activeStages[i]);
+      }
+    }
+  }
+
+  if (config.intendedOrientation === 'Trasversale') {
+    root.rotation.y = Math.PI / 2;
+  }
+
+  return root;
+}
+
 export const VolumeViewer3D: React.FC<VolumeViewer3DProps> = ({
   engineInBayDimensionsMm,
   rawEngineDimensionsMm,
   engineConfig,
+  wankelConfig,
+  engineType = 'Piston',
   overlaidChassisBays,
 }) => {
   const mountRef = useRef<HTMLDivElement | null>(null);
@@ -481,12 +655,23 @@ export const VolumeViewer3D: React.FC<VolumeViewer3DProps> = ({
       const mesh = new THREE.Mesh(boxGeo, boxMat);
       sc.engineContainer.add(mesh);
     } else {
-      // Modello 3D Procedurale del Motore + sottile contorno bounding box del motore
-      const procGroup = buildProceduralEngineMeshGroup(
-        engineConfig,
-        rawEngineDimensionsMm,
-        anyCollision,
-      );
+      // Modello 3D Procedurale del Motore (Pistoni 1A o Wankel 1B) + sottile contorno bounding box
+      let procGroup: THREE.Group;
+      if (engineType === 'Wankel' && wankelConfig) {
+        procGroup = buildProceduralWankelMeshGroup(
+          wankelConfig,
+          rawEngineDimensionsMm,
+          anyCollision,
+        );
+      } else if (engineConfig) {
+        procGroup = buildProceduralEngineMeshGroup(
+          engineConfig,
+          rawEngineDimensionsMm,
+          anyCollision,
+        );
+      } else {
+        procGroup = new THREE.Group();
+      }
       sc.engineContainer.add(procGroup);
 
       const envGeo = new THREE.BoxGeometry(
@@ -556,6 +741,8 @@ export const VolumeViewer3D: React.FC<VolumeViewer3DProps> = ({
     engineInBayDimensionsMm,
     rawEngineDimensionsMm,
     engineConfig,
+    wankelConfig,
+    engineType,
     overlaidChassisBays,
     anyCollision,
   ]);
@@ -652,8 +839,13 @@ export const VolumeViewer3D: React.FC<VolumeViewer3DProps> = ({
         {/* Overlay Info Ingombri L / W / H nel Vano */}
         <div className="absolute top-2.5 left-3 right-3 flex flex-wrap items-center justify-between gap-2 pointer-events-none text-[11px] font-mono">
           <span className="px-2 py-0.5 rounded bg-slate-900/90 border border-slate-700 text-slate-200">
-            Nel Vano ({engineConfig.intendedOrientation}): L={engineInBayDimensionsMm.lengthMm}mm •
-            W={engineInBayDimensionsMm.widthMm}mm • H={engineInBayDimensionsMm.heightMm}mm
+            Nel Vano (
+            {wankelConfig
+              ? wankelConfig.intendedOrientation
+              : (engineConfig?.intendedOrientation ?? 'Longitudinale')}
+            ): L={engineInBayDimensionsMm.lengthMm}mm • W=
+            {engineInBayDimensionsMm.widthMm}mm • H=
+            {engineInBayDimensionsMm.heightMm}mm
           </span>
           <span className="px-2 py-0.5 rounded bg-slate-900/90 border border-slate-700 text-amber-300">
             Pianali Sovrapposti: {overlaidChassisBays.length}

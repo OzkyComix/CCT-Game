@@ -8,6 +8,7 @@ import {
   Gauge,
   Layers,
   Lock,
+  RotateCw,
   Save,
   Settings2,
   ShieldAlert,
@@ -70,7 +71,13 @@ const REFERENCE_CLASSES: ReferenceClass[] = [
   'Fuoristrada',
 ];
 
-export const PistonEngineDesigner1A: React.FC = () => {
+export interface PistonEngineDesigner1AProps {
+  onSwitchToWankel?: () => void;
+}
+
+export const PistonEngineDesigner1A: React.FC<PistonEngineDesigner1AProps> = ({
+  onSwitchToWankel,
+}) => {
   const {
     currentYear,
     subBrands,
@@ -554,10 +561,21 @@ export const PistonEngineDesigner1A: React.FC = () => {
             <Flame className="w-4 h-4" />
             <span>1A — Endotermici a Pistoni (Fisica BMEP Reale)</span>
           </div>
-          <div className="px-3.5 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-500 text-xs font-mono flex items-center gap-1.5">
-            <Lock className="w-3.5 h-3.5" />
-            <span>1B — Rotativi Wankel (Fase 1B)</span>
-          </div>
+          {onSwitchToWankel ? (
+            <button
+              type="button"
+              onClick={onSwitchToWankel}
+              className="px-3.5 py-2 rounded-lg bg-slate-900 border border-amber-500/40 text-amber-300 hover:text-amber-200 hover:bg-slate-800 text-xs font-mono flex items-center gap-1.5 cursor-pointer transition shadow-sm"
+            >
+              <RotateCw className="w-3.5 h-3.5 text-amber-400" />
+              <span>1B — Rotativi Wankel (Fase 1.3 Attiva)</span>
+            </button>
+          ) : (
+            <div className="px-3.5 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-500 text-xs font-mono flex items-center gap-1.5">
+              <Lock className="w-3.5 h-3.5" />
+              <span>1B — Rotativi Wankel (Fase 1.3 Attiva)</span>
+            </div>
+          )}
           <div className="px-3.5 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-500 text-xs font-mono flex items-center gap-1.5">
             <Lock className="w-3.5 h-3.5" />
             <span>1C — Elettrici & Ibridi (Fase 1C)</span>

@@ -86,9 +86,13 @@ src/
 - [x] Implementare l'algoritmo di collisione geometrica: confrontare dimensioni LWH del motore + posizione turbine + orientamento con il vano motore di ciascun pianale.
 - [x] Colorare la piattaforma in **ROSSO** in caso di conflitto d'orientamento o superamento limiti, mostrando il delta esatto di incompatibilità fisica in millimetri ($\text{mm}$).
 
-### 1.3 Modulo 1B — Motori Rotativi (Wankel)
-- [ ] Costruire il modulo dedicato Wankel con parametri: numero di rotori, eccentricità, larghezza rotore, luci laterali/periferiche e tenuta degli apex seal.
-- [ ] Integrare il calcolo di ingombro, erogazione, emissioni e usura apex seal nella telemetria del banco prova.
+### 1.3 Modulo 1B — Motori Rotativi (Wankel) (`src/components/engine-lab/WankelEngineDesigner1B.tsx`, `src/math/wankelMath.ts`)
+- [x] Costruire il modulo dedicato Wankel con parametri geometrici e meccanici:
+  - [x] Numero di rotori (1, 2, 3, 4 rotori), raggio generazione $R$, eccentricità $e$, larghezza camera $B$, e calcolo cilindrata geometrica unitaria $V_k = 3\sqrt{3} \cdot e \cdot R \cdot B$ ed equivalente ($2\times$ per ciclo 4T).
+  - [x] Tipologie di porting luci: `Side Ports`, `Street Port`, `Bridgeport` (con regime minimo zoppicante caratteristico "brap-brap"), `Semi-Peripheral Port`, `Peripheral Port` (respirazione ad altissimi regimi fino a 13.000 RPM).
+  - [x] Materiali rotore, statore/trocoide e sigilli Apex Seal (Ghisa sferoidale, Carbonio-Alluminio, Ceramica Silicio Si3N4) con tasso di usura oraria ($\mu\text{m/1000h}$) e sensibilità estrema alla detonazione.
+  - [x] Sistema di iniezione olio OMP (Oil Metering Pump) meccanica o elettronica, consumo olio ($\text{L}/1000\text{ km}$) e miscelazione carburante premix.
+- [x] Integrare il calcolo di ingombro 3D procedurale, erogazione (coppia con formula percorsa $T = \frac{\text{BMEP} \cdot V_{\text{geom}} \cdot 100}{2\pi}$), emissioni HC e usura apex seal nella telemetria del banco prova e verifica collisione col vano motore dei pianali.
 
 ### 1.4 Modulo 1C — Elettrici e Ibridi
 - [ ] Configuratore per: tipo di elettromotore, batteria elettromotore e raffreddamento elettromotore.

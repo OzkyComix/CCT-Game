@@ -1121,3 +1121,317 @@ export function getLegalEmissionLimitForYear(year: number): number {
   if (year < 2015) return 165;
   return 125;
 }
+
+// ============================================================================
+// MODULO 1B: COMPONENTISTICA SPECIFICA MOTORI ROTATIVI (WANKEL)
+// ============================================================================
+
+export interface ApexSealSpec {
+  id: string;
+  name: string;
+  minYear: number;
+  unlockCost: DualCurrencyCost;
+  defaultUnlocked: boolean;
+  priceTier: PriceTier;
+  referenceClass: ReferenceClass;
+  /** Moltiplicatore tasso usura seal (1.0 = base, 0.45 = ceramica ultra durevole) */
+  wearRateMultiplier: number;
+  /** Limite massimo regime di sicurezza aggiuntivo */
+  rpmDelta: number;
+  bmepDeltaBar: number;
+  /** Resistenza al battito/detonazione (frantumazione) */
+  shatterResistance: number;
+  unitCostPerRotor: number;
+  rdComplexityMultiplier: number;
+  description: string;
+}
+
+export const APEX_SEAL_MATERIALS: ApexSealSpec[] = [
+  {
+    id: 'seal-chilled-cast-iron',
+    name: 'Ghisa Sferoidale Chilled con Riporto Cromo',
+    minYear: 1970,
+    unlockCost: { capitalCost: 0, rdCost: 0, minYear: 1970 },
+    defaultUnlocked: true,
+    priceTier: 'Economica',
+    referenceClass: 'Normale',
+    wearRateMultiplier: 1.25,
+    rpmDelta: -200,
+    bmepDeltaBar: 0.0,
+    shatterResistance: 1.0,
+    unitCostPerRotor: 85,
+    rdComplexityMultiplier: 0.85,
+    description: 'Soluzione storica base: buona tenuta a freddo ma pesante e soggetta a usura oltre i 7.000 rpm.',
+  },
+  {
+    id: 'seal-carbon-aluminum',
+    name: 'Composito Carbonio-Alluminio Autolubrificante',
+    minYear: 1974,
+    unlockCost: { capitalCost: 2_800_000, rdCost: 45, minYear: 1974 },
+    defaultUnlocked: true,
+    priceTier: 'Media',
+    referenceClass: 'Sport',
+    wearRateMultiplier: 0.95,
+    rpmDelta: 650,
+    bmepDeltaBar: 0.25,
+    shatterResistance: 0.82,
+    unitCostPerRotor: 240,
+    rdComplexityMultiplier: 1.1,
+    description: 'Bassa massa e bassissimo attrito sulla superficie trocoide: permette allunghi puliti fino a 8.500 rpm.',
+  },
+  {
+    id: 'seal-tool-steel-dlc',
+    name: 'Acciaio per Utensili Forgiato 3 Pezzi con Riporto DLC',
+    minYear: 1991,
+    unlockCost: { capitalCost: 6_500_000, rdCost: 95, minYear: 1991 },
+    defaultUnlocked: true,
+    priceTier: 'Premium',
+    referenceClass: 'Sport',
+    wearRateMultiplier: 0.65,
+    rpmDelta: 1100,
+    bmepDeltaBar: 0.65,
+    shatterResistance: 1.65,
+    unitCostPerRotor: 580,
+    rdComplexityMultiplier: 1.35,
+    description: 'Design a 3 pezzi con rivestimento Diamond-Like Carbon: tollera alte pressioni turbo e previene rotture.',
+  },
+  {
+    id: 'seal-ceramic-si3n4',
+    name: 'Ceramica Avanzata Nitruro di Silicio (Si3N4 Monoblocco)',
+    minYear: 1996,
+    unlockCost: { capitalCost: 15_000_000, rdCost: 210, minYear: 1996 },
+    defaultUnlocked: false,
+    priceTier: 'Lusso',
+    referenceClass: 'Corsa',
+    wearRateMultiplier: 0.38,
+    rpmDelta: 1800,
+    bmepDeltaBar: 1.1,
+    shatterResistance: 1.45,
+    unitCostPerRotor: 1_250,
+    rdComplexityMultiplier: 1.7,
+    description: 'Tecnologia Le Mans (stile 787B): peso ridottissimo, resiste a 1050°C di EGT e regimi oltre 10.500 rpm.',
+  },
+];
+
+export interface WankelPortingSpec {
+  id: 'StandardSide' | 'StreetPort' | 'Bridgeport' | 'SemiPeripheral' | 'PeripheralPort';
+  name: string;
+  minYear: number;
+  unlockCost: DualCurrencyCost;
+  defaultUnlocked: boolean;
+  lowEndTorqueMod: number;
+  highEndFlowMod: number;
+  rpmLimitBonus: number;
+  bmepDeltaBar: number;
+  idleRpm: number;
+  idleCharacter: string;
+  emissionsPenaltyPercent: number;
+  cost: number;
+  rdComplexityMultiplier: number;
+  description: string;
+}
+
+export const WANKEL_PORTING_TYPES: WankelPortingSpec[] = [
+  {
+    id: 'StandardSide',
+    name: 'Side Port Stradale (Luci sulle Piastre Laterali)',
+    minYear: 1970,
+    unlockCost: { capitalCost: 0, rdCost: 0, minYear: 1970 },
+    defaultUnlocked: true,
+    lowEndTorqueMod: 1.05,
+    highEndFlowMod: 0.94,
+    rpmLimitBonus: 0,
+    bmepDeltaBar: 0.0,
+    idleRpm: 850,
+    idleCharacter: 'Fluido, lineare e silenzioso (850 rpm)',
+    emissionsPenaltyPercent: 0,
+    cost: 150,
+    rdComplexityMultiplier: 1.0,
+    description: 'Incrocio valvole nullo/minimo: ottima regolarità al minimo, consumi ed emissioni sotto controllo.',
+  },
+  {
+    id: 'StreetPort',
+    name: 'Street Port Lavorato CNC (Diagramma Allargato +20%)',
+    minYear: 1978,
+    unlockCost: { capitalCost: 2_200_000, rdCost: 35, minYear: 1978 },
+    defaultUnlocked: true,
+    lowEndTorqueMod: 0.98,
+    highEndFlowMod: 1.08,
+    rpmLimitBonus: 400,
+    bmepDeltaBar: 0.45,
+    idleRpm: 950,
+    idleCharacter: 'Minimo leggermente cupo e sportivo (950 rpm)',
+    emissionsPenaltyPercent: 12,
+    cost: 450,
+    rdComplexityMultiplier: 1.15,
+    description: 'Condotti laterali allargati e lucidati: aumenta la respirazione agli alti giri conservando guidabilità.',
+  },
+  {
+    id: 'Bridgeport',
+    name: 'Bridgeport (Luce Ausiliaria con Ponticello — Brap Brap)',
+    minYear: 1982,
+    unlockCost: { capitalCost: 5_500_000, rdCost: 80, minYear: 1982 },
+    defaultUnlocked: true,
+    lowEndTorqueMod: 0.82,
+    highEndFlowMod: 1.22,
+    rpmLimitBonus: 950,
+    bmepDeltaBar: 0.95,
+    idleRpm: 1350,
+    idleCharacter: 'Pulsato e aggressivo "Brap-Brap-Brap" (1.350 rpm)',
+    emissionsPenaltyPercent: 34,
+    cost: 850,
+    rdComplexityMultiplier: 1.35,
+    description: 'Forte incrocio tra aspirazione e scarico: vuoto ai bassi regimi ma spinta violenta da 5.000 a 9.500 rpm.',
+  },
+  {
+    id: 'SemiPeripheral',
+    name: 'Semi-Periferico Ibrido (Side Port + Luce Periferica Ausiliaria)',
+    minYear: 1993,
+    unlockCost: { capitalCost: 9_200_000, rdCost: 140, minYear: 1993 },
+    defaultUnlocked: false,
+    lowEndTorqueMod: 0.94,
+    highEndFlowMod: 1.32,
+    rpmLimitBonus: 1250,
+    bmepDeltaBar: 1.45,
+    idleRpm: 1100,
+    idleCharacter: 'Stabile ai carichi bassi, brutale sotto spinta (1.100 rpm)',
+    emissionsPenaltyPercent: 22,
+    cost: 1_450,
+    rdComplexityMultiplier: 1.5,
+    description: 'Usa le luci laterali a regimi bassi e apre la luce periferica sulla trocoide agli alti: ideale con turbo.',
+  },
+  {
+    id: 'PeripheralPort',
+    name: 'Peripheral Port Race (Condotti Periferici Diretti — Stile 787B)',
+    minYear: 1988,
+    unlockCost: { capitalCost: 16_000_000, rdCost: 220, minYear: 1988 },
+    defaultUnlocked: false,
+    lowEndTorqueMod: 0.68,
+    highEndFlowMod: 1.48,
+    rpmLimitBonus: 2200,
+    bmepDeltaBar: 1.95,
+    idleRpm: 1850,
+    idleCharacter: 'Urlante e ingestibile sotto i 3.500 rpm (1.850 rpm)',
+    emissionsPenaltyPercent: 65,
+    cost: 2_200,
+    rdComplexityMultiplier: 1.75,
+    description: 'Flusso diretto e rettilineo dentro la camera: rendimento volumetrico estremo tra 7.500 e 11.500+ rpm.',
+  },
+];
+
+export interface WankelHousingSpec {
+  id: string;
+  name: string;
+  minYear: number;
+  unlockCost: DualCurrencyCost;
+  defaultUnlocked: boolean;
+  priceTier: PriceTier;
+  weightFactor: number;
+  thermalConductivity: number;
+  wearResistance: number;
+  costPerRotor: number;
+  rdComplexityMultiplier: number;
+  description: string;
+}
+
+export const WANKEL_HOUSING_MATERIALS: WankelHousingSpec[] = [
+  {
+    id: 'whs-iron-chrome',
+    name: 'Trocoide in Ghisa con Cromatura Dura Elettrolitica',
+    minYear: 1970,
+    unlockCost: { capitalCost: 0, rdCost: 0, minYear: 1970 },
+    defaultUnlocked: true,
+    priceTier: 'Economica',
+    weightFactor: 1.15,
+    thermalConductivity: 0.85,
+    wearResistance: 1.0,
+    costPerRotor: 320,
+    rdComplexityMultiplier: 0.9,
+    description: 'Soluzione robusta ma pesante e con limitata dissipazione termica sul lato caldo di scarico.',
+  },
+  {
+    id: 'whs-alu-cermet-nikasil',
+    name: 'Alluminio Pressofuso ad Alta Conducibilità c/ Riporto Cermet/Nikasil',
+    minYear: 1985,
+    unlockCost: { capitalCost: 4_800_000, rdCost: 65, minYear: 1985 },
+    defaultUnlocked: true,
+    priceTier: 'Premium',
+    weightFactor: 0.88,
+    thermalConductivity: 1.35,
+    wearResistance: 1.45,
+    costPerRotor: 680,
+    rdComplexityMultiplier: 1.25,
+    description: 'Dimezza il peso e dissipa rapidamente i picchi termici di scarico, proteggendo la superficie trocoide.',
+  },
+  {
+    id: 'whs-billet-alu-ceramic',
+    name: 'Casse Billet Lavorate dal Pieno CNC c/ Inserto Ceramico di Scarico',
+    minYear: 1998,
+    unlockCost: { capitalCost: 13_500_000, rdCost: 190, minYear: 1998 },
+    defaultUnlocked: false,
+    priceTier: 'Lusso',
+    weightFactor: 0.76,
+    thermalConductivity: 1.55,
+    wearResistance: 1.9,
+    costPerRotor: 1_550,
+    rdComplexityMultiplier: 1.6,
+    description: 'Rigidità torsionale strutturale massima, tolleranze millesimali per corse endurance e altissimi carichi.',
+  },
+];
+
+export interface OilMeteringSpec {
+  id: string;
+  name: string;
+  minYear: number;
+  unlockCost: DualCurrencyCost;
+  defaultUnlocked: boolean;
+  oilConsumptionLPer1000Km: number;
+  sealDurabilityBonusPercent: number;
+  emissionsPenaltyPercent: number;
+  cost: number;
+  rdComplexityMultiplier: number;
+  description: string;
+}
+
+export const OIL_METERING_SYSTEMS: OilMeteringSpec[] = [
+  {
+    id: 'omp-mechanical',
+    name: 'Pompa Meccanica a Ingranaggi OMP (Legata a Giri Motore)',
+    minYear: 1970,
+    unlockCost: { capitalCost: 0, rdCost: 0, minYear: 1970 },
+    defaultUnlocked: true,
+    oilConsumptionLPer1000Km: 1.1,
+    sealDurabilityBonusPercent: 0,
+    emissionsPenaltyPercent: 18,
+    cost: 140,
+    rdComplexityMultiplier: 0.9,
+    description: 'Inietta olio motore standard proporzionalmente ai giri: fumo e residui carboniosi a regimi bassi.',
+  },
+  {
+    id: 'omp-electronic-mikuni',
+    name: 'Pompa Elettronica Micrometrica OMP (Mappatura ECU Carico/TPS)',
+    minYear: 1989,
+    unlockCost: { capitalCost: 3_200_000, rdCost: 50, minYear: 1989 },
+    defaultUnlocked: true,
+    oilConsumptionLPer1000Km: 0.65,
+    sealDurabilityBonusPercent: 15,
+    emissionsPenaltyPercent: 6,
+    cost: 380,
+    rdComplexityMultiplier: 1.2,
+    description: 'Dosaggio ad altissima precisione gestito da centralina: riduce il consumo di olio e abbatte le emissioni.',
+  },
+  {
+    id: 'omp-premix-aviation',
+    name: 'Serbatoio Olio 2T Sintetico Separato + Premix Elettronico',
+    minYear: 1995,
+    unlockCost: { capitalCost: 7_000_000, rdCost: 110, minYear: 1995 },
+    defaultUnlocked: false,
+    oilConsumptionLPer1000Km: 0.45,
+    sealDurabilityBonusPercent: 32,
+    emissionsPenaltyPercent: 2,
+    cost: 720,
+    rdComplexityMultiplier: 1.45,
+    description: 'Non brucia l’olio esausto della coppa: inietta lubrificante sintetico 2T a ceneri zero, prolungando la vita degli apex.',
+  },
+];
+

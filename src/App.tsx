@@ -7,11 +7,13 @@ import {
   Flame,
   FlaskConical,
   Layers,
+  RotateCw,
 } from 'lucide-react';
 import { PistonEngineDesigner1A } from './components/engine-lab/PistonEngineDesigner1A';
+import { WankelEngineDesigner1B } from './components/engine-lab/WankelEngineDesigner1B';
 import { useGameStore } from './store/useGameStore';
 
-type ActiveSection = 'engine-lab-1a' | 'database-overview';
+type ActiveSection = 'engine-lab-1a' | 'engine-lab-1b' | 'database-overview';
 
 export const App: React.FC = () => {
   const {
@@ -77,7 +79,19 @@ export const App: React.FC = () => {
               }`}
             >
               <Flame className="w-4 h-4" />
-              <span>Fase 1A: Banco Prova Motori</span>
+              <span>Fase 1A: Banco Pistoni</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveSection('engine-lab-1b')}
+              className={`px-3.5 py-2 rounded-lg border flex items-center gap-2 transition cursor-pointer ${
+                activeSection === 'engine-lab-1b'
+                  ? 'bg-amber-500/20 border-amber-500 text-amber-300 font-bold'
+                  : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+              }`}
+            >
+              <RotateCw className="w-4 h-4" />
+              <span>Fase 1B: Banco Wankel</span>
             </button>
             <button
               type="button"
@@ -151,7 +165,9 @@ export const App: React.FC = () => {
 
       <main className="flex-1 max-w-[1440px] w-full mx-auto p-6">
         {activeSection === 'engine-lab-1a' ? (
-          <PistonEngineDesigner1A />
+          <PistonEngineDesigner1A onSwitchToWankel={() => setActiveSection('engine-lab-1b')} />
+        ) : activeSection === 'engine-lab-1b' ? (
+          <WankelEngineDesigner1B onSwitchToPiston={() => setActiveSection('engine-lab-1a')} />
         ) : (
           <div className="space-y-6">
             {/* Database Relazionale Modulare: Le 5 Entità Indipendenti */}

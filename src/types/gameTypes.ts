@@ -243,14 +243,41 @@ export interface PistonEngineSpecs {
   catalystEra: CatalystEra;
 }
 
+export type WankelPortType =
+  | 'StandardSide'
+  | 'StreetPort'
+  | 'Bridgeport'
+  | 'SemiPeripheral'
+  | 'PeripheralPort';
+
 export interface WankelEngineSpecs {
   rotorCount: number;
+  generatingRadiusMm: number;
   eccentricityMm: number;
   rotorWidthMm: number;
-  portType: 'Side' | 'Peripheral' | 'Bridge';
-  apexSealMaterial: string;
+  unitDisplacementCc: number;
+  totalDisplacementCc: number;
+  equivalentDisplacementCc: number;
+  portType: WankelPortType;
+  apexSealMaterialId: string;
+  apexSealMaterialName: string;
+  apexSealThicknessMm: 2.0 | 3.0;
+  housingMaterialId: string;
+  oilMeteringSystemId: string;
+  compressionRatio: number;
+  fuelType: 'Benzina' | 'BioFuel' | 'RaceFuel';
   turboType: TurboType;
+  turboCountConfig?: TurboCountConfig;
+  turboBearingType?: 'Journal' | 'BallBearing';
+  turboArRatio?: number;
+  turboStagesArRatios?: number[];
+  boostPressureBar?: number;
+  manualRedlineRpm: number;
+  intendedOrientation: EngineOrientation;
+  turboPosition: TurboPosition;
   catalystEra: CatalystEra;
+  oilConsumptionLPer1000Km: number;
+  apexSealWearRatePercentPer10kKm: number;
 }
 
 export interface ElectricHybridSpecs {
@@ -295,6 +322,8 @@ export interface EngineDynoTelemetry {
   reliabilityPercent: number;
   estimatedLifespanKm: number;
   unitProductionCost: number;
+  oilConsumptionLPer1000Km?: number;
+  apexSealWearRate?: number;
 }
 
 export interface EngineEntity {

@@ -1,12 +1,16 @@
 import { create } from 'zustand';
 import {
+  APEX_SEAL_MATERIALS,
   BLOCK_MATERIALS,
   CAMSHAFT_TYPES,
   CONROD_TYPES,
   CRANKSHAFT_TYPES,
   FUEL_SYSTEMS,
   HEAD_MATERIALS,
+  OIL_METERING_SYSTEMS,
   PISTON_TYPES,
+  WANKEL_HOUSING_MATERIALS,
+  WANKEL_PORTING_TYPES,
 } from '../data/historicalEras';
 import {
   type ChassisEntity,
@@ -78,7 +82,7 @@ export interface GameState {
   toggleComponentB2B: (componentId: string) => void;
 }
 
-// Ricava tutti i componenti base motore già sbloccati di default
+// Ricava tutti i componenti base motore già sbloccati di default (Pistoni 1A e Wankel 1B)
 const defaultUnlockedParts = [
   ...BLOCK_MATERIALS,
   ...HEAD_MATERIALS,
@@ -87,6 +91,10 @@ const defaultUnlockedParts = [
   ...CRANKSHAFT_TYPES,
   ...CAMSHAFT_TYPES,
   ...FUEL_SYSTEMS,
+  ...APEX_SEAL_MATERIALS,
+  ...WANKEL_PORTING_TYPES,
+  ...WANKEL_HOUSING_MATERIALS,
+  ...OIL_METERING_SYSTEMS,
 ]
   .filter((p) => p.defaultUnlocked)
   .map((p) => p.id);
@@ -203,6 +211,88 @@ const initialEngines: EngineEntity[] = [
       capitalCost: 45_000_000,
       rdCost: 380,
       minYear: 2010,
+    },
+  },
+  {
+    id: 'eng-wankel-13b-rew',
+    name: '1.3L Twin-Rotor Sequential Biturbo (Tipo 13B-REW)',
+    codeName: 'ROT-13B-TT',
+    ownerSubBrandId: 'sb-officine-milano',
+    createdYear: 1993,
+    propulsionType: 'Wankel_1B',
+    taxonomy: {
+      priceTier: 'Premium',
+      referenceClass: 'Sport',
+      materialStress: {
+        materialName: 'Alluminio Cermet + Apex Seal Acciaio Tool DLC',
+        materialResistanceFactor: 1.55,
+        mechanicalStressFactor: 1.15,
+      },
+      estimatedDurabilityKm: calculateEstimatedDurabilityKm('Premium', 'Sport', 1.55, 1.15),
+    },
+    dimensionsMm: {
+      lengthMm: 510,
+      widthMm: 520,
+      heightMm: 510,
+    },
+    wankelSpecs: {
+      rotorCount: 2,
+      generatingRadiusMm: 105,
+      eccentricityMm: 15,
+      rotorWidthMm: 80,
+      unitDisplacementCc: 654,
+      totalDisplacementCc: 1308,
+      equivalentDisplacementCc: 2616,
+      portType: 'StreetPort',
+      apexSealMaterialId: 'seal-tool-steel-dlc',
+      apexSealMaterialName: 'Acciaio per Utensili Forgiato 3 Pezzi con Riporto DLC',
+      apexSealThicknessMm: 2.0,
+      housingMaterialId: 'whs-alu-cermet-nikasil',
+      oilMeteringSystemId: 'omp-electronic-mikuni',
+      compressionRatio: 9.0,
+      fuelType: 'Benzina',
+      turboType: 'TwinScroll',
+      turboCountConfig: 'TwinTurbo',
+      turboBearingType: 'BallBearing',
+      turboArRatio: 0.65,
+      boostPressureBar: 0.75,
+      manualRedlineRpm: 8200,
+      intendedOrientation: 'Longitudinale',
+      turboPosition: 'Lateral',
+      catalystEra: 'Era2_ThreeWayLambda_80s90s',
+      oilConsumptionLPer1000Km: 0.65,
+      apexSealWearRatePercentPer10kKm: 2.15,
+    },
+    telemetry: {
+      curve: [
+        { rpm: 1500, torqueNm: 180, powerHp: 38 },
+        { rpm: 2500, torqueNm: 275, powerHp: 98 },
+        { rpm: 3500, torqueNm: 310, powerHp: 154 },
+        { rpm: 5000, torqueNm: 295, powerHp: 210 },
+        { rpm: 6500, torqueNm: 270, powerHp: 250 },
+        { rpm: 8000, torqueNm: 230, powerHp: 262 },
+      ],
+      peakPowerHp: 265,
+      peakPowerRpm: 6500,
+      peakTorqueNm: 310,
+      peakTorqueRpm: 3500,
+      redlineRpm: 8200,
+      dryWeightKg: 124,
+      wetWeightKg: 138,
+      thermalEfficiencyPercent: 27.2,
+      emissionsGPerKm: 248,
+      reliabilityPercent: 86.0,
+      estimatedLifespanKm: calculateEstimatedDurabilityKm('Premium', 'Sport', 1.55, 1.15),
+      unitProductionCost: 7_650,
+      oilConsumptionLPer1000Km: 0.65,
+      apexSealWearRate: 2.15,
+    },
+    b2bSaleEnabled: true,
+    b2bUnitsSold: 840,
+    developmentCost: {
+      capitalCost: 28_000_000,
+      rdCost: 240,
+      minYear: 1991,
     },
   },
 ];
