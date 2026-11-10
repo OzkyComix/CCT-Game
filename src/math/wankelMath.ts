@@ -197,6 +197,11 @@ export function calculateMaxSafeWankelRpm(config: WankelEngineConfigInput): numb
   // R standard 105 mm -> a 9.000 rpm la punta dell'apex viaggia a oltre 33 m/s!
   const baseSafeRpm = Math.round((28.5 * 30_000) / config.generatingRadiusMm);
 
+  // Fisica eccentricità albero e (corsa/raggio orbitale eccentrico del rotore):
+  // - e ridotto (12 mm): raggio d'orbita piccolo, bassa forza centrifuga rotorica e inclinazione apex ridotta (+750 rpm)
+  // - e maggiorato (18 mm): elevata massa centrifuga orbitale, momento flettente gravoso sull'albero e chattering (-750 rpm)
+  const eccentricityRpmDelta = Math.round((15.0 - config.eccentricityMm) * 250);
+
   // Fisica spessore Apex Seal:
   // - 2.0 mm: più leggero (-33% massa), riduce l'attrito centrifugo e permette +600 rpm prima di chattering / sollevamento tenuta
   // - 3.0 mm: più pesante, maggiore inerzia centrifuga sulle cave del rotore (-500 rpm sul regime massimo sicuro)
@@ -209,6 +214,7 @@ export function calculateMaxSafeWankelRpm(config: WankelEngineConfigInput): numb
 
   const rawMaxRpm =
     baseSafeRpm +
+    eccentricityRpmDelta +
     sealSpec.rpmDelta +
     portSpec.rpmLimitBonus +
     thicknessBonusRpm +
@@ -312,15 +318,35 @@ export function calculateWankelCosts(config: WankelEngineConfigInput): {
     Lusso: 2.35,
   };
 
+  // Calcolo volume camera singolo rotore Vk = 3 * sqrt(3) * e * R * B:
+  // Benchmark 13B standard: R=105, e=15, B=80 -> Vk = 654 cc
+  const currentVkCc =
+    (3 * Math.sqrt(3) * config.eccentricityMm * config.generatingRadiusMm * config.rotorWidthMm) /
+    1000.0;
+  // Fattore scalare di massa e lavorazione cassa trocoide rispetto al benchmark 654 cc
+  const rotorSizeScaling = Math.pow(currentVkCc / 654.0, 0.75);
+
+  // La lunghezza e il costo materiale degli apex seal scalano con la larghezza rotore B:
+  const apexWidthScaling = config.rotorWidthMm / 80.0;
+
+  // L'albero eccentrico cresce in diametro perni e contrappesi con l'eccentricità e e con il numero di rotori:
+  const eccentricShaftCost = Math.round(
+    (260 + config.rotorCount * 130) * Math.pow(config.eccentricityMm / 15.0, 0.75),
+  );
+
   // Sigilli Apex Seal da 3.0 mm richiedono elettroerosione (EDM) più profonda sulle cave del rotore (+20% costo materiale/lavorazione)
   const sealThicknessCostFactor = config.apexSealThicknessMm === 3.0 ? 1.2 : 1.0;
 
+  const housingScaledCost = housingSpec.costPerRotor * rotorSizeScaling;
+  const sealScaledCost =
+    sealSpec.unitCostPerRotor * 3 * sealThicknessCostFactor * apexWidthScaling;
+
   const coreRotaryCost =
-    (housingSpec.costPerRotor + sealSpec.unitCostPerRotor * 3 * sealThicknessCostFactor) *
-      config.rotorCount +
+    (housingScaledCost + sealScaledCost) * config.rotorCount +
+    eccentricShaftCost +
     portSpec.cost +
     ompSpec.cost +
-    380;
+    120;
 
   let turboSystemUnitCost = 0;
   if (config.turboType !== 'NaturallyAspirated') {
@@ -347,8 +373,17 @@ export function calculateWankelCosts(config: WankelEngineConfigInput): {
       catalystSpec.unitCost,
   );
 
+  // Scostamento dai parametri geometrici standard (105 / 15 / 80) richiede stampi e banchi di equilibratura dedicati:
+  const customGeometryFactor =
+    1.0 +
+    (Math.abs(config.generatingRadiusMm - 105) / 105 +
+      Math.abs(config.eccentricityMm - 15) / 15 +
+      Math.abs(config.rotorWidthMm - 80) / 80) *
+      0.35;
+
   const globalComplexity =
-    (0.85 + config.rotorCount * 0.35) *
+    (0.8 + config.rotorCount * 0.38) *
+    customGeometryFactor *
     sealSpec.rdComplexityMultiplier *
     portSpec.rdComplexityMultiplier *
     housingSpec.rdComplexityMultiplier *
@@ -422,7 +457,9 @@ export function simulateWankelEngineDyno(config: WankelEngineConfigInput): Engin
 
   // Regime di coppia massima naturale Wankel:
   // Side port ha picco a 5.000–5.500 rpm, Bridgeport a 6.800 rpm, Peripheral port a 8.200–8.600 rpm!
-  const naturalPeakTorqueRpm =
+  // L'eccentricità dell'albero modifica il regime: e ridotto (12mm) sposta il picco in alto (+240 rpm), e maggiorato (18mm) in basso (-240 rpm)
+  const eccentricityRpmShift = Math.round((15.0 - config.eccentricityMm) * 80);
+  const basePeakRpm =
     config.portType === 'StandardSide'
       ? 5200
       : config.portType === 'StreetPort'
@@ -432,6 +469,7 @@ export function simulateWankelEngineDyno(config: WankelEngineConfigInput): Engin
           : config.portType === 'SemiPeripheral'
             ? 7200
             : 8400;
+  const naturalPeakTorqueRpm = basePeakRpm + eccentricityRpmShift;
 
   // Portata Multi-Turbo per Wankel
   const totalCompressorFlow = activeTurboStagesAr.reduce(
@@ -560,7 +598,25 @@ export function simulateWankelEngineDyno(config: WankelEngineConfigInput): Engin
       currentBmepBar = currentBmepBar * (1 - effectiveSpool) + forcedBmep * effectiveSpool;
     }
 
-    currentBmepBar = Number((currentBmepBar * catalystPowerFactor * knockPowerMultiplier).toFixed(2));
+    // Modificatore di coppia da braccio di leva dell'eccentrico (e) e attrito d'inclinazione apex agli alti regimi:
+    const eccentricityTorqueMod = 1.0 + (config.eccentricityMm - 15.0) * 0.012;
+    const highRpmObliquityFactor =
+      rpm > 7200
+        ? Math.max(
+            0.88,
+            1.0 - Math.max(0, config.eccentricityMm - 15.0) * 0.018 * ((rpm - 7200) / 2500),
+          )
+        : 1.0;
+
+    currentBmepBar = Number(
+      (
+        currentBmepBar *
+        eccentricityTorqueMod *
+        highRpmObliquityFactor *
+        catalystPowerFactor *
+        knockPowerMultiplier
+      ).toFixed(2),
+    );
 
     // Nel motore Wankel ogni rotore compie 1 combustione utile per ogni giro d'albero eccentrico.
     // La formula fisica rigorosa della coppia per il Wankel sulla cilindrata geometrica totale V_tot è:
@@ -670,6 +726,9 @@ export function simulateWankelEngineDyno(config: WankelEngineConfigInput): Engin
     PeripheralPort: 25.0,
   }[config.portType] ?? 0;
 
+  // Contropressione termica del catalizzatore sul Wankel (scarico molto caldo >950°C):
+  const catalystReliabilityPenalty = catalystSpec.reliabilityPenaltyPetrolPercent * 1.8;
+
   const rawReliability =
     maxReliabilityCeiling +
     rpmBonus +
@@ -677,6 +736,7 @@ export function simulateWankelEngineDyno(config: WankelEngineConfigInput): Engin
     housingSpec.wearResistance * 1.5 -
     boostPenalty -
     portReliabilityPenalty -
+    catalystReliabilityPenalty -
     knockWarning.reliabilityPenaltyPercent;
 
   const reliabilityPercent = Number(
@@ -693,6 +753,15 @@ export function simulateWankelEngineDyno(config: WankelEngineConfigInput): Engin
 
   baseLifespanKm *= housingSpec.wearResistance * 0.55 + sealSpec.shatterResistance * 0.45;
   baseLifespanKm *= 1 + (ompSpec.sealDurabilityBonusPercent / 100) * 0.8;
+
+  // Impatto contropressione termica catalizzatore su durata Wankel
+  if (config.catalystEra === 'None') {
+    baseLifespanKm *= 1.05;
+  } else if (config.catalystEra === 'Era1_Oxidizing_70s') {
+    baseLifespanKm *= 0.95;
+  } else if (config.catalystEra === 'Era3_MultiStage_DPF_SCR_2000s') {
+    baseLifespanKm *= 0.91;
+  }
 
   // Vantaggio durata tenute 3.0 mm (+18% durata all'usura meccanica)
   if (config.apexSealThicknessMm === 3.0) {

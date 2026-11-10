@@ -624,11 +624,16 @@ export const WankelEngineDesigner1B: React.FC<WankelEngineDesignerProps> = ({
               </div>
 
               <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-1.5">
-                <div className="flex justify-between">
+                <div className="flex justify-between items-center text-xs">
                   <span className="text-slate-400">Eccentricità Albero (e)</span>
-                  <span className="text-sky-300 font-bold">
-                    {config.eccentricityMm.toFixed(1)} mm
-                  </span>
+                  <div className="flex items-center gap-1.5 font-mono">
+                    <span className="text-sky-300 font-bold">
+                      {config.eccentricityMm.toFixed(1)} mm
+                    </span>
+                    <span className="text-[10px] text-slate-500">
+                      (Max {maxSafeMechanicalRpm} rpm)
+                    </span>
+                  </div>
                 </div>
                 <input
                   type="range"
@@ -644,9 +649,9 @@ export const WankelEngineDesigner1B: React.FC<WankelEngineDesignerProps> = ({
                   }
                   className="w-full"
                 />
-                <div className="text-[10px] text-slate-500 flex justify-between">
-                  <span>12 mm (Alto RPM)</span>
-                  <span>18 mm (Più Coppia)</span>
+                <div className="text-[10px] text-slate-500 flex justify-between font-mono">
+                  <span>12 mm (Alto RPM • Meno Inerzia)</span>
+                  <span>18 mm (Più Coppia • Più Leva)</span>
                 </div>
               </div>
 
@@ -1367,10 +1372,16 @@ export const WankelEngineDesigner1B: React.FC<WankelEngineDesignerProps> = ({
                       </div>
                       <div className="text-[10px] text-slate-400">{cat.description}</div>
                     </div>
-                    <div className="text-right shrink-0 text-[10px]">
-                      <span className="text-emerald-400 font-bold">
+                    <div className="text-right shrink-0 text-[10px] space-y-0.5">
+                      <div className="text-emerald-400 font-bold font-mono">
                         -{cat.emissionsReductionPercent}% g/km • ${cat.unitCost}
-                      </span>
+                      </div>
+                      <div className="text-slate-400 font-mono">
+                        {cat.powerPenaltyPercent > 0 ? `-${cat.powerPenaltyPercent}% CV` : 'Zero perdita CV'}
+                        {cat.reliabilityPenaltyPetrolPercent > 0
+                          ? ` • -${(cat.reliabilityPenaltyPetrolPercent * 1.8).toFixed(1)}% Affid.`
+                          : ''}
+                      </div>
                     </div>
                   </button>
                 ))}
@@ -1461,8 +1472,19 @@ export const WankelEngineDesigner1B: React.FC<WankelEngineDesignerProps> = ({
               </div>
 
               <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800">
+                <div className="text-[10px] text-slate-400">EMISSIONI CO2 / OMOLOGAZIONE</div>
+                <div
+                  className={`text-sm font-bold font-mono ${
+                    exceedsEmissionLaw ? 'text-red-400' : 'text-emerald-300'
+                  }`}
+                >
+                  {telemetry.emissionsGPerKm} g/km
+                </div>
+              </div>
+
+              <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800">
                 <div className="text-[10px] text-slate-400">COSTO PRODUZIONE</div>
-                <div className="text-sm font-bold text-emerald-300">
+                <div className="text-sm font-bold text-emerald-300 font-mono">
                   ${telemetry.unitProductionCost.toLocaleString('it-IT')}
                 </div>
               </div>
