@@ -9,7 +9,10 @@ import {
   type WankelEngineConfigInput,
   getActiveWankelTurboStages,
 } from '../../math/wankelMath';
-import type { DimensionsLWH } from '../../types/gameTypes';
+import type {
+  DimensionsLWH,
+  ElectricHybridEngineConfigInput,
+} from '../../types/gameTypes';
 
 export interface OverlaidChassisBayItem {
   id: string;
@@ -29,8 +32,10 @@ interface VolumeViewer3DProps {
   engineConfig?: PistonEngineConfigInput;
   /** Configurazione opzionale del motore rotativo Wankel 1B */
   wankelConfig?: WankelEngineConfigInput;
-  /** Tipo di propulsore per scegliere il modello procedurale ('Piston' | 'Wankel') */
-  engineType?: 'Piston' | 'Wankel';
+  /** Configurazione opzionale del powertrain elettrico/ibrido 1C */
+  electricConfig?: ElectricHybridEngineConfigInput;
+  /** Tipo di propulsore per scegliere il modello procedurale ('Piston' | 'Wankel' | 'ElectricHybrid') */
+  engineType?: 'Piston' | 'Wankel' | 'ElectricHybrid';
   /** Lista di pianali selezionati con checkbox per la sovrapposizione simultanea 3D */
   overlaidChassisBays: OverlaidChassisBayItem[];
 }
@@ -562,11 +567,175 @@ function buildProceduralWankelMeshGroup(
   return root;
 }
 
+/**
+ * Modello 3D procedurale per Powertrain Elettrici e Ibridi (Fase 1.4 — Modulo 1C):
+ * - Motore elettrico a cassa cilindrica alettata con resolver e flangia
+ * - Inverter di potenza ad alta tensione con dissipatore alettato
+ * - Cablaggi schermati ad alta tensione arancione fluorescente (Safety Orange)
+ * - Skateboard battery pack sotto il pianale per BEV o pacco compatto per ibridi
+ * - Blocco motore termico bicilindrico/quadricilindrico compatto di supporto per ibridi
+ */
+function buildProceduralElectricHybridMeshGroup(
+  config: ElectricHybridEngineConfigInput,
+  _rawDimensionsMm: DimensionsLWH,
+  isCollision: boolean,
+): THREE.Group {
+  const root = new THREE.Group();
+
+  const motorHousingMat = new THREE.MeshStandardMaterial({
+    color: isCollision ? 0xef4444 : 0x0284c7,
+    metalness: 0.75,
+    roughness: 0.28,
+  });
+
+  const ribMat = new THREE.MeshStandardMaterial({
+    color: isCollision ? 0xf87171 : 0x0369a1,
+    metalness: 0.8,
+    roughness: 0.35,
+  });
+
+  const inverterMat = new THREE.MeshStandardMaterial({
+    color: isCollision ? 0xef4444 : 0x475569,
+    metalness: 0.65,
+    roughness: 0.35,
+  });
+
+  const orangeCableMat = new THREE.MeshStandardMaterial({
+    color: 0xf97316,
+    metalness: 0.2,
+    roughness: 0.5,
+    emissive: 0xea580c,
+    emissiveIntensity: 0.35,
+  });
+
+  const batteryMat = new THREE.MeshStandardMaterial({
+    color: isCollision ? 0xb91c1c : 0x1e293b,
+    metalness: 0.5,
+    roughness: 0.45,
+  });
+
+  const iceMat = new THREE.MeshStandardMaterial({
+    color: isCollision ? 0xdc2626 : 0x334155,
+    metalness: 0.6,
+    roughness: 0.4,
+  });
+
+  const Ds = config.statorDiameterMm / 1000;
+  const Lr = config.rotorLengthMm / 1000;
+  const isAxialFlux = config.electricMotorType === 'AxialFlux';
+  const motorLen = isAxialFlux ? 0.095 : Lr + 0.085;
+  const motorDiam = Ds + 0.035;
+
+  // 1. Cassa cilindrica dello statore
+  const statorGeo = new THREE.CylinderGeometry(motorDiam / 2, motorDiam / 2, motorLen, 24);
+  statorGeo.rotateZ(Math.PI / 2);
+  const statorMesh = new THREE.Mesh(statorGeo, motorHousingMat);
+  statorMesh.position.set(0, 0, 0);
+  root.add(statorMesh);
+
+  // 2. Anelli di raffreddamento alettati perimetrali
+  const ribCount = isAxialFlux ? 3 : Math.max(4, Math.floor(motorLen / 0.03));
+  for (let i = 0; i < ribCount; i++) {
+    const xOff = -motorLen / 2 + (motorLen / (ribCount + 1)) * (i + 1);
+    const ribGeo = new THREE.TorusGeometry(motorDiam / 2 + 0.006, 0.005, 12, 28);
+    ribGeo.rotateY(Math.PI / 2);
+    const ribMesh = new THREE.Mesh(ribGeo, ribMat);
+    ribMesh.position.set(xOff, 0, 0);
+    root.add(ribMesh);
+  }
+
+  // 3. Resolver / Endcap Flange
+  const endcapGeo = new THREE.CylinderGeometry(motorDiam * 0.42, motorDiam * 0.42, 0.035, 20);
+  endcapGeo.rotateZ(Math.PI / 2);
+  const endcapMesh = new THREE.Mesh(endcapGeo, ribMat);
+  endcapMesh.position.set(motorLen / 2 + 0.018, 0, 0);
+  root.add(endcapMesh);
+
+  // 4. Albero di trasmissione e gruppo differenziale e-Axle
+  const shaftGeo = new THREE.CylinderGeometry(0.024, 0.024, motorLen + 0.12, 16);
+  shaftGeo.rotateZ(Math.PI / 2);
+  const shaftMesh = new THREE.Mesh(shaftGeo, ribMat);
+  shaftMesh.position.set(0, 0, 0);
+  root.add(shaftMesh);
+
+  const diffGeo = new THREE.CylinderGeometry(0.09, 0.09, 0.08, 18);
+  diffGeo.rotateX(Math.PI / 2);
+  const diffMesh = new THREE.Mesh(diffGeo, motorHousingMat);
+  diffMesh.position.set(-motorLen / 2 - 0.05, 0, 0);
+  root.add(diffMesh);
+
+  // 5. Box Inverter di Potenza (sopra l'e-machine)
+  const invL = 0.22;
+  const invW = 0.18;
+  const invH = 0.085;
+  const invGeo = new THREE.BoxGeometry(invL, invH, invW);
+  const invMesh = new THREE.Mesh(invGeo, inverterMat);
+  invMesh.position.set(0, motorDiam / 2 + invH / 2 + 0.02, 0);
+  root.add(invMesh);
+
+  const finGeo = new THREE.BoxGeometry(invL * 0.9, 0.015, invW * 0.88);
+  const finMesh = new THREE.Mesh(finGeo, ribMat);
+  finMesh.position.set(0, motorDiam / 2 + invH + 0.01, 0);
+  root.add(finMesh);
+
+  // 6. Cablaggi Alta Tensione Arancioni (HV Safety Orange)
+  const cableRadius = 0.011;
+  for (let c = -1; c <= 1; c++) {
+    const cableGeo = new THREE.CylinderGeometry(cableRadius, cableRadius, invH + 0.035, 12);
+    const cableMesh = new THREE.Mesh(cableGeo, orangeCableMat);
+    cableMesh.position.set(c * 0.045, motorDiam / 2 + 0.02, 0.04);
+    root.add(cableMesh);
+  }
+
+  // 7. Pacco Batteria Skateboard (BEV) o compatto (Hybrid)
+  if (config.systemType === 'PureEV') {
+    const batL = 0.85;
+    const batW = 0.72;
+    const batH = 0.075;
+    const batGeo = new THREE.BoxGeometry(batL, batH, batW);
+    const batMesh = new THREE.Mesh(batGeo, batteryMat);
+    batMesh.position.set(0, -motorDiam / 2 - batH / 2 - 0.04, 0);
+    root.add(batMesh);
+
+    const connGeo = new THREE.BoxGeometry(0.06, 0.04, 0.07);
+    const connMesh = new THREE.Mesh(connGeo, orangeCableMat);
+    connMesh.position.set(batL / 2 - 0.05, -motorDiam / 2 - 0.02, 0);
+    root.add(connMesh);
+  } else {
+    const batL = 0.32;
+    const batW = 0.28;
+    const batH = 0.14;
+    const batGeo = new THREE.BoxGeometry(batL, batH, batW);
+    const batMesh = new THREE.Mesh(batGeo, batteryMat);
+    batMesh.position.set(-motorLen / 2 - 0.22, 0.02, 0);
+    root.add(batMesh);
+
+    // Blocco Motore Termico ICE accoppiato a fianco
+    const iceDispL = (config.iceDisplacementCc ?? 1998) / 1000;
+    const iceScale = Math.pow(iceDispL / 2.0, 0.35);
+    const iceL = 0.34 * iceScale;
+    const iceH = 0.32 * iceScale;
+    const iceW = 0.28 * iceScale;
+    const iceGeo = new THREE.BoxGeometry(iceL, iceH, iceW);
+    const iceMesh = new THREE.Mesh(iceGeo, iceMat);
+    iceMesh.position.set(motorLen / 2 + iceL / 2 + 0.03, 0.02, 0);
+    root.add(iceMesh);
+
+    const cvGeo = new THREE.BoxGeometry(iceL * 0.9, 0.04, iceW * 0.85);
+    const cvMesh = new THREE.Mesh(cvGeo, ribMat);
+    cvMesh.position.set(motorLen / 2 + iceL / 2 + 0.03, iceH / 2 + 0.035, 0);
+    root.add(cvMesh);
+  }
+
+  return root;
+}
+
 export const VolumeViewer3D: React.FC<VolumeViewer3DProps> = ({
   engineInBayDimensionsMm,
   rawEngineDimensionsMm,
   engineConfig,
   wankelConfig,
+  electricConfig,
   engineType = 'Piston',
   overlaidChassisBays,
 }) => {
@@ -753,9 +922,15 @@ export const VolumeViewer3D: React.FC<VolumeViewer3DProps> = ({
       const mesh = new THREE.Mesh(boxGeo, boxMat);
       sc.engineContainer.add(mesh);
     } else {
-      // Modello 3D Procedurale del Motore (Pistoni 1A o Wankel 1B) + sottile contorno bounding box
+      // Modello 3D Procedurale del Motore (Pistoni 1A, Wankel 1B o Elettrico/Ibrido 1C) + contorno bounding box
       let procGroup: THREE.Group;
-      if (engineType === 'Wankel' && wankelConfig) {
+      if (engineType === 'ElectricHybrid' && electricConfig) {
+        procGroup = buildProceduralElectricHybridMeshGroup(
+          electricConfig,
+          rawEngineDimensionsMm,
+          anyCollision,
+        );
+      } else if (engineType === 'Wankel' && wankelConfig) {
         procGroup = buildProceduralWankelMeshGroup(
           wankelConfig,
           rawEngineDimensionsMm,
@@ -840,6 +1015,7 @@ export const VolumeViewer3D: React.FC<VolumeViewer3DProps> = ({
     rawEngineDimensionsMm,
     engineConfig,
     wankelConfig,
+    electricConfig,
     engineType,
     overlaidChassisBays,
     anyCollision,

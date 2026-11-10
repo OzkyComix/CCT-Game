@@ -281,13 +281,81 @@ export interface WankelEngineSpecs {
   apexSealWearRatePercentPer10kKm: number;
 }
 
+export type ElectricMotorType =
+  | 'PermanentMagnetSync'
+  | 'InductionAsync'
+  | 'ElectricallyExcitedSync'
+  | 'AxialFlux';
+
+export type MotorLayoutConfig =
+  | 'SingleMotor_FWD'
+  | 'SingleMotor_RWD'
+  | 'DualMotor_eAWD'
+  | 'TriMotor_TorqueVectoring'
+  | 'QuadMotor_Independent';
+
+export type BatteryChemistry = 'LFP' | 'NMC811' | 'NCA' | 'SolidState';
+
+export type ElectricCoolingSystem = 'Air' | 'LiquidGlycol' | 'DirectDielectric';
+
+export type InverterTech = 'Silicon_IGBT' | 'SiliconCarbide_SiC' | 'GalliumNitride_GaN';
+
+export type VoltageArchitecture = 400 | 800;
+
 export interface ElectricHybridSpecs {
   systemType: HybridSystemType;
-  electricMotorType: 'PermanentMagnetSync' | 'InductionAsync' | 'AxialFlux';
-  batteryChemistry: 'LFP' | 'NMC' | 'SolidState';
+  electricMotorType: ElectricMotorType;
+  motorLayout: MotorLayoutConfig;
+  motorCount: number;
+  statorDiameterMm: number;
+  rotorLengthMm: number;
+  batteryChemistry: BatteryChemistry;
   batteryCapacityKwh: number;
-  coolingSystem: 'Air' | 'LiquidGlycol' | 'DirectDielectric';
+  voltageArchitecture: VoltageArchitecture;
+  coolingSystem: ElectricCoolingSystem;
+  inverterTech: InverterTech;
   peakElectricPowerKw: number;
+  continuousPowerKw: number;
+  peakTorqueNm: number;
+  maxRpm: number;
+  gearboxType: 'SingleSpeedDirect' | 'TwoSpeedDualClutch';
+  gearRatio: number;
+  batteryWeightKg: number;
+  motorWeightKg: number;
+  totalPowertrainWeightKg: number;
+  estimatedRangeKm: number;
+  efficiencyWhPerKm: number;
+  batteryLifespanCycles: number;
+  // Per topologie ibride (MHEV, FullHybrid, PHEV, RangeExtender)
+  iceEngineDisplacementCc?: number;
+  icePowerHp?: number;
+  iceTorqueNm?: number;
+  combinedPowerHp: number;
+  combinedTorqueNm: number;
+}
+
+export interface ElectricHybridEngineConfigInput {
+  systemType: HybridSystemType;
+  electricMotorType: ElectricMotorType;
+  motorLayout: MotorLayoutConfig;
+  statorDiameterMm: number; // 180 - 320 mm
+  rotorLengthMm: number; // 100 - 280 mm
+  batteryChemistry: BatteryChemistry;
+  batteryCapacityKwh: number; // 1.5 - 140 kWh
+  voltageArchitecture: VoltageArchitecture;
+  coolingSystem: ElectricCoolingSystem;
+  inverterTech: InverterTech;
+  gearboxType: 'SingleSpeedDirect' | 'TwoSpeedDualClutch';
+  gearRatio: number; // 6.5 - 13.5:1
+  maxMotorRpm: number; // 12000 - 22000 rpm
+  // Componente termica per ibridi
+  iceArchitecture?: 'Inline' | 'V' | 'Boxer' | 'Wankel';
+  iceCylindersOrRotors?: number;
+  iceDisplacementCc?: number;
+  iceFuelType?: 'Benzina' | 'Diesel' | 'BioFuel';
+  iceTurbocharged?: boolean;
+  priceTier: PriceTier;
+  referenceClass: ReferenceClass;
 }
 
 export interface DynoCurvePoint {

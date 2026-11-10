@@ -15,6 +15,7 @@ import {
   Sparkles,
   Unlock,
   Wind,
+  Zap,
 } from 'lucide-react';
 import {
   BLOCK_MATERIALS,
@@ -73,10 +74,12 @@ const REFERENCE_CLASSES: ReferenceClass[] = [
 
 export interface PistonEngineDesigner1AProps {
   onSwitchToWankel?: () => void;
+  onSwitchToElectricHybrid?: () => void;
 }
 
 export const PistonEngineDesigner1A: React.FC<PistonEngineDesigner1AProps> = ({
   onSwitchToWankel,
+  onSwitchToElectricHybrid,
 }) => {
   const {
     currentYear,
@@ -576,10 +579,21 @@ export const PistonEngineDesigner1A: React.FC<PistonEngineDesigner1AProps> = ({
               <span>1B — Rotativi Wankel (Fase 1.3 Attiva)</span>
             </div>
           )}
-          <div className="px-3.5 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-500 text-xs font-mono flex items-center gap-1.5">
-            <Lock className="w-3.5 h-3.5" />
-            <span>1C — Elettrici & Ibridi (Fase 1C)</span>
-          </div>
+          {onSwitchToElectricHybrid ? (
+            <button
+              type="button"
+              onClick={onSwitchToElectricHybrid}
+              className="px-3.5 py-2 rounded-lg bg-slate-900 border border-sky-500/40 text-sky-300 hover:text-sky-200 hover:bg-slate-800 text-xs font-mono flex items-center gap-1.5 cursor-pointer transition shadow-sm"
+            >
+              <Zap className="w-3.5 h-3.5 text-sky-400" />
+              <span>1C — Elettrici & Ibridi (Fase 1.4 Attiva)</span>
+            </button>
+          ) : (
+            <div className="px-3.5 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-500 text-xs font-mono flex items-center gap-1.5">
+              <Lock className="w-3.5 h-3.5" />
+              <span>1C — Elettrici & Ibridi (Fase 1.4 Attiva)</span>
+            </div>
+          )}
         </div>
 
         {/* Riepilogo sintetico cilindrata, BMEP e ingombro */}

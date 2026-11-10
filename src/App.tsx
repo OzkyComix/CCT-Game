@@ -8,12 +8,18 @@ import {
   FlaskConical,
   Layers,
   RotateCw,
+  Zap,
 } from 'lucide-react';
+import { ElectricHybridDesigner1C } from './components/engine-lab/ElectricHybridDesigner1C';
 import { PistonEngineDesigner1A } from './components/engine-lab/PistonEngineDesigner1A';
 import { WankelEngineDesigner1B } from './components/engine-lab/WankelEngineDesigner1B';
 import { useGameStore } from './store/useGameStore';
 
-type ActiveSection = 'engine-lab-1a' | 'engine-lab-1b' | 'database-overview';
+type ActiveSection =
+  | 'engine-lab-1a'
+  | 'engine-lab-1b'
+  | 'engine-lab-1c'
+  | 'database-overview';
 
 export const App: React.FC = () => {
   const {
@@ -95,6 +101,18 @@ export const App: React.FC = () => {
             </button>
             <button
               type="button"
+              onClick={() => setActiveSection('engine-lab-1c')}
+              className={`px-3.5 py-2 rounded-lg border flex items-center gap-2 transition cursor-pointer ${
+                activeSection === 'engine-lab-1c'
+                  ? 'bg-sky-500/20 border-sky-500 text-sky-300 font-bold'
+                  : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+              }`}
+            >
+              <Zap className="w-4 h-4" />
+              <span>Fase 1C: Banco EV & Ibridi</span>
+            </button>
+            <button
+              type="button"
               onClick={() => setActiveSection('database-overview')}
               className={`px-3.5 py-2 rounded-lg border flex items-center gap-2 transition cursor-pointer ${
                 activeSection === 'database-overview'
@@ -165,9 +183,20 @@ export const App: React.FC = () => {
 
       <main className="flex-1 max-w-[1440px] w-full mx-auto p-6">
         {activeSection === 'engine-lab-1a' ? (
-          <PistonEngineDesigner1A onSwitchToWankel={() => setActiveSection('engine-lab-1b')} />
+          <PistonEngineDesigner1A
+            onSwitchToWankel={() => setActiveSection('engine-lab-1b')}
+            onSwitchToElectricHybrid={() => setActiveSection('engine-lab-1c')}
+          />
         ) : activeSection === 'engine-lab-1b' ? (
-          <WankelEngineDesigner1B onSwitchToPiston={() => setActiveSection('engine-lab-1a')} />
+          <WankelEngineDesigner1B
+            onSwitchToPiston={() => setActiveSection('engine-lab-1a')}
+            onSwitchToElectricHybrid={() => setActiveSection('engine-lab-1c')}
+          />
+        ) : activeSection === 'engine-lab-1c' ? (
+          <ElectricHybridDesigner1C
+            onSwitchToPiston={() => setActiveSection('engine-lab-1a')}
+            onSwitchToWankel={() => setActiveSection('engine-lab-1b')}
+          />
         ) : (
           <div className="space-y-6">
             {/* Database Relazionale Modulare: Le 5 Entità Indipendenti */}

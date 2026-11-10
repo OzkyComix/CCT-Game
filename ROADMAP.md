@@ -94,9 +94,10 @@ src/
   - [x] Sistema di iniezione olio OMP (Oil Metering Pump) meccanica o elettronica, consumo olio ($\text{L}/1000\text{ km}$) e miscelazione carburante premix.
 - [x] Integrare il calcolo di ingombro 3D procedurale, erogazione (coppia con formula percorsa $T = \frac{\text{BMEP} \cdot V_{\text{geom}} \cdot 100}{2\pi}$), emissioni HC e usura apex seal nella telemetria del banco prova e verifica collisione col vano motore dei pianali.
 
-### 1.4 Modulo 1C — Elettrici e Ibridi
-- [ ] Configuratore per: tipo di elettromotore, batteria elettromotore e raffreddamento elettromotore.
-- [ ] Logica di integrazione nei powertrain: **MHEV**, **Full Hybrid**, **PHEV** e **Range Extender**.
+### 1.4 Modulo 1C — Elettrici e Ibridi (`src/components/engine-lab/ElectricHybridDesigner1C.tsx`, `src/math/electricHybridMath.ts`, `src/data/electricHybridData.ts`)
+- [x] Configuratore per: tipo di elettromotore (PSM, ASM, EESM, Flusso Assiale), geometria statore/rotore ($D_s, L_r$), batteria elettromotore (LFP, NMC811, NCA, Stato Solido), chimica, architettura 400V/800V e raffreddamento elettromotore (Aria, Liquido Glicole, Immersione Dielettrica).
+- [x] Logica di integrazione nei powertrain: **BEV (100% Elettrico)**, **MHEV 48V (Torque Fill)**, **Full Hybrid HEV**, **PHEV (Plug-in)** e **Range Extender REEV**.
+- [x] Rendering CAD 3D procedurale per powertrain elettrici/ibridi (e-motor alettato, inverter SiC/GaN, cavi alta tensione arancioni schermati e skateboard battery pack) con verifica collisione multi-pianale.
 
 ### 1.5 Telemetria Banco Prova
 - [x] Calcolo istantaneo e grafico Canvas per:
