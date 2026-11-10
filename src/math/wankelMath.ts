@@ -550,20 +550,12 @@ export function simulateWankelEngineDyno(config: WankelEngineConfigInput): Engin
           ? Math.max(avgSpool, eTurboLowRamp)
           : 0.55 * fastestStageSpool + 0.45 * avgSpool;
 
-      // Nei Sequential Biturbo, simula la lieve flessione morbida ("valle di coppia" di transizione a ~4.200-4.300 rpm
-      // dovuta all'apertura della valvola di prespool prima dell'entrata del secondo turbo)
-      const isSequential = config.turboCountConfig === 'TwinTurbo';
-      const sequentialValleyFactor = isSequential
-        ? 1.0 - 0.068 * Math.exp(-Math.pow((rpm - 4250) / 340, 2))
-        : 1.0;
-
       const boostDomeCrown = 0.96 + 0.04 * Math.exp(-Math.pow((rpm - 4800) / 3200, 2));
       const forcedBmep =
         targetForcedPeakBmep *
         boostDomeCrown *
         avgHighFlow *
-        portFillFactor *
-        sequentialValleyFactor;
+        portFillFactor;
 
       currentBmepBar = currentBmepBar * (1 - effectiveSpool) + forcedBmep * effectiveSpool;
     }
