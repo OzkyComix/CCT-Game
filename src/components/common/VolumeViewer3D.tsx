@@ -2,11 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import {
   type PistonEngineConfigInput,
-  getActiveTurboStagesAr,
+  getActiveTurboStages,
 } from '../../math/engineMath';
 import {
   type WankelEngineConfigInput,
-  getActiveWankelTurboStagesAr,
+  getActiveWankelTurboStages,
 } from '../../math/wankelMath';
 import type { DimensionsLWH } from '../../types/gameTypes';
 
@@ -74,6 +74,129 @@ function createTextSprite(
 }
 
 /**
+ * Modella una singola unità turbocompressore 3D realistica e separata:
+ * - Lato Freddo: Chiocciola compressore in alluminio/argento con bocca d'aspirazione conica e condotto tangenziale
+ * - CHRA centrale: Corpo cuscinetti in acciaio scuro
+ * - Lato Caldo: Chiocciola turbina in ghisa / arancione termico con condotto downpipe
+ * Il diametro 3D si ridimensiona dinamicamente in tempo reale in base ai millimetri effettivi (diamMm)!
+ */
+function createDetailedTurboMesh(
+  diamMm: number,
+  isHotV: boolean,
+): THREE.Group {
+  const tGroup = new THREE.Group();
+
+  // Scala dinamica visiva: 35mm -> raggio ~0.038, 90mm -> raggio ~0.068
+  const compRadius = 0.024 + (Math.max(35, Math.min(95, diamMm)) / 1000) * 0.46;
+  const turbRadius = compRadius * 0.92;
+  const scrollThickness = compRadius * 0.52;
+  const chraLength = compRadius * 0.38;
+
+  const compMat = new THREE.MeshStandardMaterial({
+    color: 0xe2e8f0,
+    roughness: 0.22,
+    metalness: 0.88,
+  });
+
+  const chraMat = new THREE.MeshStandardMaterial({
+    color: 0x334155,
+    roughness: 0.55,
+    metalness: 0.75,
+  });
+
+  const turbMat = new THREE.MeshStandardMaterial({
+    color: isHotV ? 0xea580c : 0x9a3412,
+    emissive: isHotV ? 0x7c2d12 : 0x431407,
+    roughness: 0.65,
+    metalness: 0.45,
+  });
+
+  // 1. Chiocciola Fredda (Compressore Alluminio)
+  const compScrollGeo = new THREE.CylinderGeometry(
+    compRadius,
+    compRadius * 0.88,
+    scrollThickness,
+    20,
+  );
+  compScrollGeo.rotateZ(Math.PI / 2);
+  const compScrollMesh = new THREE.Mesh(compScrollGeo, compMat);
+  compScrollMesh.position.set(chraLength / 2 + scrollThickness / 2, 0, 0);
+  tGroup.add(compScrollMesh);
+
+  // Bocca d'aspirazione conica frontale (Snout / Tromboncino)
+  const compInletGeo = new THREE.CylinderGeometry(
+    compRadius * 0.48,
+    compRadius * 0.56,
+    compRadius * 0.42,
+    18,
+  );
+  compInletGeo.rotateZ(Math.PI / 2);
+  const compInletMesh = new THREE.Mesh(compInletGeo, compMat);
+  compInletMesh.position.set(
+    chraLength / 2 + scrollThickness + (compRadius * 0.42) / 2,
+    0,
+    0,
+  );
+  tGroup.add(compInletMesh);
+
+  // Beccuccio mandata aria compressa verso intercooler (Discharge nozzle tangenziale)
+  const compOutletGeo = new THREE.CylinderGeometry(
+    compRadius * 0.32,
+    compRadius * 0.32,
+    compRadius * 0.62,
+    14,
+  );
+  const compOutletMesh = new THREE.Mesh(compOutletGeo, compMat);
+  compOutletMesh.position.set(
+    chraLength / 2 + scrollThickness / 2,
+    compRadius * 0.82,
+    0,
+  );
+  tGroup.add(compOutletMesh);
+
+  // 2. CHRA (Centro cuscinetti)
+  const chraGeo = new THREE.CylinderGeometry(
+    compRadius * 0.36,
+    compRadius * 0.36,
+    chraLength,
+    16,
+  );
+  chraGeo.rotateZ(Math.PI / 2);
+  const chraMesh = new THREE.Mesh(chraGeo, chraMat);
+  tGroup.add(chraMesh);
+
+  // 3. Chiocciola Calda (Turbina Ghisa / Calore)
+  const turbScrollGeo = new THREE.CylinderGeometry(
+    turbRadius * 0.9,
+    turbRadius,
+    scrollThickness * 0.92,
+    20,
+  );
+  turbScrollGeo.rotateZ(Math.PI / 2);
+  const turbScrollMesh = new THREE.Mesh(turbScrollGeo, turbMat);
+  turbScrollMesh.position.set(-(chraLength / 2 + (scrollThickness * 0.92) / 2), 0, 0);
+  tGroup.add(turbScrollMesh);
+
+  // Condotto scarico fumi (Downpipe flange)
+  const turbExhaustGeo = new THREE.CylinderGeometry(
+    turbRadius * 0.44,
+    turbRadius * 0.48,
+    turbRadius * 0.44,
+    16,
+  );
+  turbExhaustGeo.rotateZ(Math.PI / 2);
+  const turbExhaustMesh = new THREE.Mesh(turbExhaustGeo, turbMat);
+  turbExhaustMesh.position.set(
+    -(chraLength / 2 + scrollThickness * 0.92 + (turbRadius * 0.44) / 2),
+    0,
+    0,
+  );
+  tGroup.add(turbExhaustMesh);
+
+  return tGroup;
+}
+
+/**
  * Costruisce il Modello 3D Procedurale del Motore (Monoblocco, Bancate inclinate,
  * Testate OHV/SOHC/DOHC, Cilindri, Collettori e Turbine Frontali/Laterali/Hot-V)
  */
@@ -116,19 +239,6 @@ function buildProceduralEngineMeshGroup(
     color: 0x1e293b,
     roughness: 0.6,
     metalness: 0.5,
-  });
-
-  const turboColdMat = new THREE.MeshStandardMaterial({
-    color: 0xe2e8f0,
-    roughness: 0.2,
-    metalness: 0.9,
-  });
-
-  const turboHotMat = new THREE.MeshStandardMaterial({
-    color: config.turboPosition === 'HotV' ? 0xf97316 : 0x78350f,
-    emissive: config.turboPosition === 'HotV' ? 0x7c2d12 : 0x000000,
-    roughness: 0.5,
-    metalness: 0.65,
   });
 
   // 1. Coppa dell'olio + Basamento inferiore (Crankcase)
@@ -240,54 +350,57 @@ function buildProceduralEngineMeshGroup(
     buildBank(-outerRad, cylPerRow, -0.015, -0.02);
   }
 
-  // 3. Turbocompressori Procedurali (posizionati in Front, Lateral o dentro la Hot-V, con diametro individuale per ogni stadio!)
+  // 3. Turbocompressori Procedurali Dettagliati (separati fisicamente, con diametro mm reale per ciascuno)
   if (config.turboType !== 'NaturallyAspirated') {
-    const activeStages = getActiveTurboStagesAr(config);
+    const activeStages = getActiveTurboStages(config);
     const count = activeStages.length;
-
-    const createTurboUnit = (x: number, y: number, z: number, stageAr: number) => {
-      const turboRadius = 0.036 + stageAr * 0.036;
-      const tGroup = new THREE.Group();
-      // Chiocciola calda (scarico)
-      const hotGeo = new THREE.CylinderGeometry(turboRadius, turboRadius, 0.042, 18);
-      hotGeo.rotateZ(Math.PI / 2);
-      const hotMesh = new THREE.Mesh(hotGeo, turboHotMat);
-      tGroup.add(hotMesh);
-
-      // Chiocciola fredda (aspirazione)
-      const coldGeo = new THREE.CylinderGeometry(
-        turboRadius * 1.06,
-        turboRadius * 1.06,
-        0.042,
-        18,
-      );
-      coldGeo.rotateZ(Math.PI / 2);
-      const coldMesh = new THREE.Mesh(coldGeo, turboColdMat);
-      coldMesh.position.set(0.044, 0, 0);
-      tGroup.add(coldMesh);
-
-      tGroup.position.set(x, y, z);
-      engineRoot.add(tGroup);
-    };
+    const isHotV = config.turboPosition === 'HotV';
 
     if (config.turboPosition === 'Front') {
+      const spacingZ = Math.max(0.18, (W * 0.55) / Math.max(1, count - 1));
       for (let i = 0; i < count; i++) {
-        const zOff = count === 1 ? 0 : ((i / (count - 1)) - 0.5) * (W * 0.52);
-        createTurboUnit(blockCoreLength / 2 + 0.065, -H * 0.06, zOff, activeStages[i]);
+        const zOff = count === 1 ? 0 : (i - (count - 1) / 2) * spacingZ;
+        const tMesh = createDetailedTurboMesh(activeStages[i].diamMm, false);
+        tMesh.position.set(blockCoreLength / 2 + 0.08, -H * 0.05, zOff);
+        engineRoot.add(tMesh);
       }
     } else if (config.turboPosition === 'HotV') {
-      // Dentro la V centrale tra le bancate!
+      // Dentro la V centrale: separate fisicamente lungo l'asse X per evitare qualunque sovrapposizione
+      const spacingX = Math.max(0.16, (blockCoreLength * 0.6) / Math.max(1, count - 1));
       for (let i = 0; i < count; i++) {
-        const xOff = count === 1 ? 0 : ((i / (count - 1)) - 0.5) * (blockCoreLength * 0.62);
-        const zOff = count >= 2 ? (i % 2 === 0 ? 0.035 : -0.035) : 0;
-        createTurboUnit(xOff, H * 0.16, zOff, activeStages[i]);
+        const xOff = count === 1 ? 0 : (i - (count - 1) / 2) * spacingX;
+        const zOff = count >= 2 ? (i % 2 === 0 ? -0.028 : 0.028) : 0;
+        const tMesh = createDetailedTurboMesh(activeStages[i].diamMm, isHotV);
+        tMesh.position.set(xOff, H * 0.17, zOff);
+        engineRoot.add(tMesh);
       }
     } else {
-      // Laterali esterne sui fianchi W
+      // Laterali esterne sui fianchi W:
+      // Se V o Boxer con 2 turbine: una per bancata (fianco sinistro +Z, fianco destro -Z)
+      // Se Inline con 2 turbine: entrambe sul fianco scarico ma distanziate lungo X di almeno 0.22m
+      // Se Quad-Turbo (4 turbine): 2 a sinistra e 2 a destra distanziate lungo X
+      const isVOrBoxer =
+        config.architecture === 'V' ||
+        config.architecture === 'Boxer' ||
+        config.architecture === 'W';
+
       for (let i = 0; i < count; i++) {
-        const side = i % 2 === 0 ? 1 : -1;
-        const xOff = count <= 2 ? 0 : (Math.floor(i / 2) - 0.5) * (blockCoreLength * 0.45);
-        createTurboUnit(xOff, -H * 0.08, side * (W * 0.42), activeStages[i]);
+        let side = 1;
+        let xOff = 0;
+        if (isVOrBoxer && count === 2) {
+          side = i === 0 ? 1 : -1;
+          xOff = 0;
+        } else if (count === 4) {
+          side = i < 2 ? 1 : -1;
+          xOff = (i % 2 === 0 ? -1 : 1) * 0.12;
+        } else {
+          side = -1;
+          const spacingX = Math.max(0.2, (blockCoreLength * 0.72) / Math.max(1, count - 1));
+          xOff = count === 1 ? 0 : (i - (count - 1) / 2) * spacingX;
+        }
+        const tMesh = createDetailedTurboMesh(activeStages[i].diamMm, false);
+        tMesh.position.set(xOff, -H * 0.07, side * (W * 0.44));
+        engineRoot.add(tMesh);
       }
     }
   }
@@ -330,18 +443,6 @@ function buildProceduralWankelMeshGroup(
     color: config.referenceClass === 'Corsa' ? 0xd97706 : 0x0284c7,
     roughness: 0.3,
     metalness: 0.6,
-  });
-
-  const turboHotMat = new THREE.MeshStandardMaterial({
-    color: 0x78350f,
-    roughness: 0.5,
-    metalness: 0.65,
-  });
-
-  const turboColdMat = new THREE.MeshStandardMaterial({
-    color: 0xe2e8f0,
-    roughness: 0.2,
-    metalness: 0.9,
   });
 
   // 1. Sandwich dei Rotori e delle Piastre Intermedie Wankel
@@ -420,39 +521,32 @@ function buildProceduralWankelMeshGroup(
   sumpMesh.position.set(0, -(R + e) * 1.05 - 0.03, 0);
   root.add(sumpMesh);
 
-  // 4. Turbocompressori Wankel
+  // 4. Turbocompressori Wankel Procedurali Dettagliati (separati nello spazio 3D)
   if (config.turboType !== 'NaturallyAspirated') {
-    const activeStages = getActiveWankelTurboStagesAr(config);
+    const activeStages = getActiveWankelTurboStages(config);
     const count = activeStages.length;
-
-    const createWankelTurbo = (x: number, y: number, z: number, stageAr: number) => {
-      const radius = 0.036 + stageAr * 0.034;
-      const tGroup = new THREE.Group();
-
-      const hotGeo = new THREE.CylinderGeometry(radius, radius, 0.042, 18);
-      hotGeo.rotateZ(Math.PI / 2);
-      const hotMesh = new THREE.Mesh(hotGeo, turboHotMat);
-      tGroup.add(hotMesh);
-
-      const coldGeo = new THREE.CylinderGeometry(radius * 1.06, radius * 1.06, 0.042, 18);
-      coldGeo.rotateZ(Math.PI / 2);
-      const coldMesh = new THREE.Mesh(coldGeo, turboColdMat);
-      coldMesh.position.set(0.044, 0, 0);
-      tGroup.add(coldMesh);
-
-      tGroup.position.set(x, y, z);
-      root.add(tGroup);
-    };
+    const exhaustFlankZ = (R + e) * 1.08 + 0.05;
 
     if (config.turboPosition === 'Front') {
+      const spacingZ = Math.max(0.18, (W * 0.52) / Math.max(1, count - 1));
       for (let i = 0; i < count; i++) {
-        const zOff = count === 1 ? 0 : (i / (count - 1) - 0.5) * (W * 0.52);
-        createWankelTurbo(totalSandwichLen / 2 + 0.065, -0.02, zOff, activeStages[i]);
+        const zOff = count === 1 ? 0 : (i - (count - 1) / 2) * spacingZ;
+        const tMesh = createDetailedTurboMesh(activeStages[i].diamMm, false);
+        tMesh.position.set(totalSandwichLen / 2 + 0.075, -0.015, zOff);
+        root.add(tMesh);
       }
     } else {
+      // Posizionamento laterale sul fianco di scarico:
+      // SEPARAZIONE FISICA REALE: le turbine sono distanziate di almeno 200 mm lungo X
+      // e con quote Y/Z sfalsate (layout stile Sequential Twin-Turbo), senza MAI toccarsi o fondersi in un unico tubo
+      const spacingX = Math.max(0.2, (totalSandwichLen * 0.95) / Math.max(1, count - 1));
       for (let i = 0; i < count; i++) {
-        const xOff = count === 1 ? 0 : (i / (count - 1) - 0.5) * (totalSandwichLen * 0.65);
-        createWankelTurbo(xOff, 0.02, (R + e) * 1.12 + 0.05, activeStages[i]);
+        const xOff = count === 1 ? 0 : (i - (count - 1) / 2) * spacingX;
+        const yOff = count >= 2 ? (i % 2 === 0 ? -0.03 : 0.03) : 0;
+        const zOff = count >= 2 ? exhaustFlankZ + (i % 2 === 0 ? -0.015 : 0.02) : exhaustFlankZ;
+        const tMesh = createDetailedTurboMesh(activeStages[i].diamMm, false);
+        tMesh.position.set(xOff, yOff, zOff);
+        root.add(tMesh);
       }
     }
   }

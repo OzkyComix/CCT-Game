@@ -235,6 +235,7 @@ export interface PistonEngineSpecs {
   turboArRatio?: number;
   /** Diametro/A/R individuale per ciascuna turbina (Single=1, Twin=2, Triple=3, Quad=4) */
   turboStagesArRatios?: number[];
+  turboStagesDiametersMm?: number[];
   boostPressureBar?: number;
   compressionRatio?: number;
   manualRedlineRpm?: number;
@@ -271,6 +272,7 @@ export interface WankelEngineSpecs {
   turboBearingType?: 'Journal' | 'BallBearing';
   turboArRatio?: number;
   turboStagesArRatios?: number[];
+  turboStagesDiametersMm?: number[];
   boostPressureBar?: number;
   manualRedlineRpm: number;
   intendedOrientation: EngineOrientation;

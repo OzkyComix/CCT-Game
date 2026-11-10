@@ -255,6 +255,8 @@ const initialEngines: EngineEntity[] = [
       turboCountConfig: 'TwinTurbo',
       turboBearingType: 'BallBearing',
       turboArRatio: 0.65,
+      turboStagesArRatios: [0.65, 0.65],
+      turboStagesDiametersMm: [52, 52],
       boostPressureBar: 0.75,
       manualRedlineRpm: 8200,
       intendedOrientation: 'Longitudinale',

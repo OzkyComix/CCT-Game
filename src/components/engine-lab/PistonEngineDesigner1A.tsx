@@ -40,7 +40,9 @@ import {
   calculateEngineCosts,
   calculateMaxSafeMechanicalRpm,
   calculatePistonGeometryAndDimensions,
+  getActiveTurboStages,
   getActiveTurboStagesAr,
+  impellerMmToArRatio,
   simulatePistonEngineDyno,
 } from '../../math/engineMath';
 import { evaluateEngineBayCompatibility } from '../../math/volumeMath';
@@ -121,6 +123,7 @@ export const PistonEngineDesigner1A: React.FC<PistonEngineDesigner1AProps> = ({
     turboBearingType: 'BallBearing',
     turboArRatio: 0.65,
     turboStagesArRatios: [0.65, 0.65, 0.65, 0.65],
+    turboStagesDiametersMm: [52, 52, 52, 52],
     boostPressureBar: 1.35,
     turboPosition: 'HotV',
     catalystEra: 'Era4_ActiveGlobalFilter_Euro7',
@@ -440,6 +443,7 @@ export const PistonEngineDesigner1A: React.FC<PistonEngineDesigner1AProps> = ({
         turboBearingType: config.turboBearingType,
         turboArRatio: config.turboArRatio,
         turboStagesArRatios: getActiveTurboStagesAr(config),
+        turboStagesDiametersMm: getActiveTurboStages(config).map((s) => s.diamMm),
         boostPressureBar: config.boostPressureBar,
         compressionRatio: config.compressionRatio,
         manualRedlineRpm: telemetry.redlineRpm,
@@ -1513,11 +1517,12 @@ export const PistonEngineDesigner1A: React.FC<PistonEngineDesigner1AProps> = ({
                                 ...p,
                                 turboArRatio: 0.65,
                                 turboStagesArRatios: [0.65, 0.65, 0.65, 0.65],
+                                turboStagesDiametersMm: [52, 52, 52, 52],
                               }))
                             }
                             className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 cursor-pointer"
                           >
-                            Preset: Simmetriche (50mm)
+                            Preset: Simmetriche (52mm)
                           </button>
                           <button
                             type="button"
@@ -1525,72 +1530,137 @@ export const PistonEngineDesigner1A: React.FC<PistonEngineDesigner1AProps> = ({
                               setConfig((p) => ({
                                 ...p,
                                 turboArRatio: 0.72,
-                                turboStagesArRatios: [0.42, 1.0, 0.45, 1.05],
+                                turboStagesArRatios: [0.42, 0.95, 0.45, 1.0],
+                                turboStagesDiametersMm: [42, 68, 45, 72],
                               }))
                             }
                             className="px-2 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/60 text-amber-200 font-bold cursor-pointer"
                           >
-                            Preset: Sequenziale Asimmetrico (40mm + 67mm)
+                            Preset: Sequenziale Asimmetrico (42mm + 68mm)
                           </button>
                         </div>
                       )}
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                      {getActiveTurboStagesAr(config).map((stageAr, idx) => {
-                        const diamMm = arRatioToImpellerMm(stageAr);
+                      {getActiveTurboStages(config).map((stage) => {
                         const roleDesc =
-                          stageAr <= 0.5
+                          stage.diamMm <= 48
                             ? 'Piccola (Spool istantaneo ai bassi)'
-                            : stageAr <= 0.85
+                            : stage.diamMm <= 64
                               ? 'Media (Erogazione bilanciata)'
                               : 'Grande (Alto flusso agli alti RPM)';
                         return (
                           <div
-                            key={idx}
-                            className="p-2.5 rounded bg-slate-950 border border-slate-800 space-y-1"
+                            key={stage.index}
+                            className="p-3 rounded-lg bg-slate-900 border border-slate-800 space-y-2.5"
                           >
                             <div className="flex items-center justify-between text-[11px]">
                               <span className="font-bold text-sky-300">
-                                Turbina #{idx + 1}{' '}
+                                Turbina #{stage.index + 1}{' '}
                                 <span className="text-[10px] font-normal text-slate-400">
                                   ({roleDesc})
                                 </span>
                               </span>
-                              <span className="font-bold text-amber-300">
-                                Ø {diamMm} mm (A/R {stageAr.toFixed(2)})
+                              <span className="font-bold text-amber-300 font-mono">
+                                Ø {stage.diamMm} mm • A/R {stage.ar.toFixed(2)}
                               </span>
                             </div>
-                            <input
-                              type="range"
-                              min={0.35}
-                              max={1.4}
-                              step={0.05}
-                              value={stageAr}
-                              onChange={(e) => {
-                                const newVal = Number(e.target.value);
-                                setConfig((p) => {
-                                  const nextArr = [...(p.turboStagesArRatios ?? [0.65, 0.65, 0.65, 0.65])];
-                                  nextArr[idx] = newVal;
-                                  const activeCount =
-                                    TURBO_COUNT_CONFIGS.find((tc) => tc.id === p.turboCountConfig)
-                                      ?.turbineCount ?? 1;
-                                  const avgAr =
-                                    nextArr
-                                      .slice(0, activeCount)
-                                      .reduce((s, v) => s + v, 0) / activeCount;
-                                  return {
-                                    ...p,
-                                    turboArRatio: Number(avgAr.toFixed(2)),
-                                    turboStagesArRatios: nextArr,
-                                  };
-                                });
-                              }}
-                              className="w-full"
-                            />
-                            <div className="flex justify-between text-[10px] text-slate-500">
-                              <span>Ø 36mm (0.35 A/R)</span>
-                              <span>Ø 86mm (1.40 A/R)</span>
+
+                            {/* Slider Diametro Girante Compressore */}
+                            <div className="space-y-1">
+                              <div className="flex justify-between text-[10px] text-slate-400">
+                                <span>Diametro Girante Compressore:</span>
+                                <span className="text-slate-200 font-bold">{stage.diamMm} mm</span>
+                              </div>
+                              <input
+                                type="range"
+                                min={35}
+                                max={90}
+                                step={1}
+                                value={stage.diamMm}
+                                onChange={(e) => {
+                                  const newDiam = Number(e.target.value);
+                                  setConfig((p) => {
+                                    const nextDiam = [
+                                      ...(p.turboStagesDiametersMm ?? [52, 52, 52, 52]),
+                                    ];
+                                    nextDiam[stage.index] = newDiam;
+                                    const nextAr = [
+                                      ...(p.turboStagesArRatios ?? [0.65, 0.65, 0.65, 0.65]),
+                                    ];
+                                    nextAr[stage.index] = impellerMmToArRatio(newDiam);
+                                    const activeCount =
+                                      TURBO_COUNT_CONFIGS.find(
+                                        (tc) => tc.id === p.turboCountConfig,
+                                      )?.turbineCount ?? 1;
+                                    const avgAr =
+                                      nextAr
+                                        .slice(0, activeCount)
+                                        .reduce((s, v) => s + v, 0) / activeCount;
+                                    return {
+                                      ...p,
+                                      turboArRatio: Number(avgAr.toFixed(2)),
+                                      turboStagesDiametersMm: nextDiam,
+                                      turboStagesArRatios: nextAr,
+                                    };
+                                  });
+                                }}
+                                className="w-full"
+                              />
+                              <div className="flex justify-between text-[9px] text-slate-500">
+                                <span>Ø 35mm (Spool rapido)</span>
+                                <span>Ø 90mm (High Flow)</span>
+                              </div>
+                            </div>
+
+                            {/* Slider Rapporto A/R Turbina Scarico */}
+                            <div className="space-y-1">
+                              <div className="flex justify-between text-[10px] text-slate-400">
+                                <span>Rapporto A/R Alloggiamento Scarico:</span>
+                                <span className="text-slate-200 font-bold">
+                                  {stage.ar.toFixed(2)}
+                                </span>
+                              </div>
+                              <input
+                                type="range"
+                                min={0.35}
+                                max={1.3}
+                                step={0.05}
+                                value={stage.ar}
+                                onChange={(e) => {
+                                  const newAr = Number(e.target.value);
+                                  setConfig((p) => {
+                                    const nextAr = [
+                                      ...(p.turboStagesArRatios ?? [0.65, 0.65, 0.65, 0.65]),
+                                    ];
+                                    nextAr[stage.index] = newAr;
+                                    const nextDiam = [
+                                      ...(p.turboStagesDiametersMm ?? [52, 52, 52, 52]),
+                                    ];
+                                    nextDiam[stage.index] = arRatioToImpellerMm(newAr);
+                                    const activeCount =
+                                      TURBO_COUNT_CONFIGS.find(
+                                        (tc) => tc.id === p.turboCountConfig,
+                                      )?.turbineCount ?? 1;
+                                    const avgAr =
+                                      nextAr
+                                        .slice(0, activeCount)
+                                        .reduce((s, v) => s + v, 0) / activeCount;
+                                    return {
+                                      ...p,
+                                      turboArRatio: Number(avgAr.toFixed(2)),
+                                      turboStagesArRatios: nextAr,
+                                      turboStagesDiametersMm: nextDiam,
+                                    };
+                                  });
+                                }}
+                                className="w-full"
+                              />
+                              <div className="flex justify-between text-[9px] text-slate-500">
+                                <span>0.35 A/R (Poco ritardo)</span>
+                                <span>1.30 A/R (Allungo libero)</span>
+                              </div>
                             </div>
                           </div>
                         );

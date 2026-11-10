@@ -28,10 +28,13 @@ import {
 import { evaluateEngineBayCompatibility } from '../../math/volumeMath';
 import {
   type WankelEngineConfigInput,
+  arRatioToImpellerMm,
   calculateMaxSafeWankelRpm,
   calculateWankelCosts,
   calculateWankelGeometryAndDimensions,
+  getActiveWankelTurboStages,
   getActiveWankelTurboStagesAr,
+  impellerMmToArRatio,
   simulateWankelEngineDyno,
 } from '../../math/wankelMath';
 import { useGameStore } from '../../store/useGameStore';
@@ -77,6 +80,7 @@ export const WankelEngineDesigner1B: React.FC<WankelEngineDesignerProps> = ({
   // Metadati Wankel
   const [engineName, setEngineName] = useState('1.3L Twin-Rotor Sequential Biturbo');
   const [codeName, setCodeName] = useState('ROT-13B-REW');
+  const [isCustomEngineName, setIsCustomEngineName] = useState(false);
   const [ownerSubBrandId, setOwnerSubBrandId] = useState(
     subBrands[0]?.id ?? 'sb-officine-milano',
   );
@@ -99,6 +103,7 @@ export const WankelEngineDesigner1B: React.FC<WankelEngineDesignerProps> = ({
     turboBearingType: 'BallBearing',
     turboArRatio: 0.65,
     turboStagesArRatios: [0.65, 0.65],
+    turboStagesDiametersMm: [52, 52],
     boostPressureBar: 0.85,
     turboPosition: 'Lateral',
     manualRedlineRpm: 8200,
@@ -252,6 +257,7 @@ export const WankelEngineDesigner1B: React.FC<WankelEngineDesignerProps> = ({
         turboBearingType: config.turboBearingType,
         turboArRatio: config.turboArRatio,
         turboStagesArRatios: getActiveWankelTurboStagesAr(config),
+        turboStagesDiametersMm: getActiveWankelTurboStages(config).map((s) => s.diamMm),
         boostPressureBar: config.boostPressureBar,
         manualRedlineRpm: telemetry.redlineRpm,
         intendedOrientation: config.intendedOrientation,
@@ -376,7 +382,10 @@ export const WankelEngineDesigner1B: React.FC<WankelEngineDesignerProps> = ({
                 <input
                   type="text"
                   value={engineName}
-                  onChange={(e) => setEngineName(e.target.value)}
+                  onChange={(e) => {
+                    setEngineName(e.target.value);
+                    setIsCustomEngineName(true);
+                  }}
                   className="w-full px-3 py-2 rounded bg-slate-950 border border-slate-700 text-slate-100"
                 />
               </div>
@@ -385,7 +394,10 @@ export const WankelEngineDesigner1B: React.FC<WankelEngineDesignerProps> = ({
                 <input
                   type="text"
                   value={codeName}
-                  onChange={(e) => setCodeName(e.target.value)}
+                  onChange={(e) => {
+                    setCodeName(e.target.value);
+                    setIsCustomEngineName(true);
+                  }}
                   className="w-full px-3 py-2 rounded bg-slate-950 border border-slate-700 text-slate-100"
                 />
               </div>
@@ -533,7 +545,43 @@ export const WankelEngineDesigner1B: React.FC<WankelEngineDesignerProps> = ({
                   <button
                     type="button"
                     key={r.count}
-                    onClick={() => setConfig((p) => ({ ...p, rotorCount: r.count }))}
+                    onClick={() => {
+                      setConfig((p) => ({ ...p, rotorCount: r.count }));
+                      if (!isCustomEngineName) {
+                        const lit =
+                          r.count === 1
+                            ? '0.7L'
+                            : r.count === 2
+                              ? '1.3L'
+                              : r.count === 3
+                                ? '2.0L'
+                                : '2.6L';
+                        const rotDesc =
+                          r.count === 1
+                            ? 'Single-Rotor'
+                            : r.count === 2
+                              ? 'Twin-Rotor'
+                              : r.count === 3
+                                ? 'Tri-Rotor'
+                                : 'Quad-Rotor';
+                        const turboDesc =
+                          config.turboType === 'NaturallyAspirated'
+                            ? 'Aspirato'
+                            : config.turboCountConfig === 'TwinTurbo'
+                              ? 'Sequential Biturbo'
+                              : 'Turbo';
+                        setEngineName(`${lit} ${rotDesc} ${turboDesc}`);
+                        setCodeName(
+                          r.count === 1
+                            ? 'ROT-1R'
+                            : r.count === 2
+                              ? 'ROT-13B-REW'
+                              : r.count === 3
+                                ? 'ROT-20B-REW'
+                                : 'ROT-26B-R',
+                        );
+                      }
+                    }}
                     className={`p-2.5 rounded-lg border text-left cursor-pointer transition ${
                       config.rotorCount === r.count
                         ? 'bg-amber-500/20 border-amber-500 text-amber-200 font-bold'
@@ -835,31 +883,72 @@ export const WankelEngineDesigner1B: React.FC<WankelEngineDesignerProps> = ({
                 })}
               </div>
 
-              {/* Selettore Spessore Apex Seal (2mm vs 3mm) */}
-              <div className="flex items-center justify-between p-2.5 rounded bg-slate-950 border border-slate-800 mt-2">
-                <span className="text-slate-400 text-[11px]">
-                  Spessore Apex Seal: 2.0 mm (Giri Elevati) vs 3.0 mm (Carico / Durata Boost)
-                </span>
-                <div className="flex gap-1.5">
-                  {[2.0, 3.0].map((th) => (
-                    <button
-                      type="button"
-                      key={th}
-                      onClick={() =>
-                        setConfig((p) => ({
-                          ...p,
-                          apexSealThicknessMm: th as 2.0 | 3.0,
-                        }))
-                      }
-                      className={`px-3 py-1 rounded text-xs font-bold cursor-pointer transition ${
-                        config.apexSealThicknessMm === th
-                          ? 'bg-amber-500 text-slate-950'
-                          : 'bg-slate-900 border border-slate-700 text-slate-300'
-                      }`}
-                    >
-                      {th.toFixed(1)} mm
-                    </button>
-                  ))}
+              {/* Selettore Spessore Apex Seal (2mm vs 3mm) con Fisica & Costo Reale */}
+              <div className="space-y-1.5 mt-2.5">
+                <div className="flex justify-between items-center text-[11px] text-slate-400">
+                  <span className="uppercase tracking-wider font-bold">
+                    Spessore Cave Guarnizioni Apicali (Apex Seal)
+                  </span>
+                  <span className="text-amber-300 font-bold">
+                    Selezionato: {config.apexSealThicknessMm.toFixed(1)} mm
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setConfig((p) => ({
+                        ...p,
+                        apexSealThicknessMm: 2.0,
+                      }))
+                    }
+                    className={`p-2.5 rounded-lg border text-left cursor-pointer transition ${
+                      config.apexSealThicknessMm === 2.0
+                        ? 'bg-amber-500/20 border-amber-500 text-amber-200 font-bold'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="font-bold">2.0 mm — Leggerezza & Allungo Giri</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">
+                        +600 RPM
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-slate-400 mt-1">
+                      Massa ridotta del 33%, minore attrito centrifugo sulle pareti della trocoide. Ritarda il chattering agli altissimi regimi ma tollera meno pressione boost.
+                    </div>
+                    <div className="text-[10px] text-sky-400 font-mono mt-1">
+                      Costo lavorazione standard • Ideale per aspirati e pista
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setConfig((p) => ({
+                        ...p,
+                        apexSealThicknessMm: 3.0,
+                      }))
+                    }
+                    className={`p-2.5 rounded-lg border text-left cursor-pointer transition ${
+                      config.apexSealThicknessMm === 3.0
+                        ? 'bg-amber-500/20 border-amber-500 text-amber-200 font-bold'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="font-bold">3.0 mm — Heavy-Duty & Tolleranza Boost</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800">
+                        +25% Boost/Knock
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-slate-400 mt-1">
+                      Tenuta rinforzata strutturale per alte pressioni turbo e resistenza al battito. -500 RPM sul limite massimo per maggiore massa centrifuga.
+                    </div>
+                    <div className="text-[10px] text-rose-300 font-mono mt-1">
+                      +20% Costo EDM cave rotore • -500 RPM limite meccanico
+                    </div>
+                  </button>
                 </div>
               </div>
             </div>
@@ -1066,9 +1155,9 @@ export const WankelEngineDesigner1B: React.FC<WankelEngineDesignerProps> = ({
                   ))}
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-slate-400 mb-1 text-[11px]">Cuscinetti</label>
+                    <label className="block text-slate-400 mb-1 text-[11px]">Cuscinetti Turbine</label>
                     <div className="grid grid-cols-2 gap-1.5">
                       <button
                         type="button"
@@ -1101,30 +1190,7 @@ export const WankelEngineDesigner1B: React.FC<WankelEngineDesignerProps> = ({
 
                   <div>
                     <div className="flex justify-between mb-1">
-                      <span className="text-slate-400 text-[11px]">Diametro A/R</span>
-                      <span className="text-amber-300 font-bold">
-                        {config.turboArRatio.toFixed(2)}
-                      </span>
-                    </div>
-                    <input
-                      type="range"
-                      min={0.35}
-                      max={1.4}
-                      step={0.05}
-                      value={config.turboArRatio}
-                      onChange={(e) =>
-                        setConfig((p) => ({
-                          ...p,
-                          turboArRatio: Number(e.target.value),
-                        }))
-                      }
-                      className="w-full"
-                    />
-                  </div>
-
-                  <div>
-                    <div className="flex justify-between mb-1">
-                      <span className="text-slate-400 text-[11px]">Pressione Boost</span>
+                      <span className="text-slate-400 text-[11px]">Pressione Boost Massima</span>
                       <span className="text-emerald-300 font-bold">
                         {config.boostPressureBar.toFixed(2)} bar
                       </span>
@@ -1143,6 +1209,179 @@ export const WankelEngineDesigner1B: React.FC<WankelEngineDesignerProps> = ({
                       }
                       className="w-full"
                     />
+                  </div>
+                </div>
+
+                {/* Personalizzazione Singola di Ciascuna Turbina (Slider separati) */}
+                <div className="space-y-3 pt-3 border-t border-slate-800">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <span className="text-slate-300 font-bold uppercase text-[11px]">
+                        Stadi Turbine Individuali ({getActiveWankelTurboStages(config).length}x)
+                      </span>
+                      <p className="text-[10px] text-slate-500">
+                        Configura separatamente diametro girante e A/R per ogni singola turbina
+                      </p>
+                    </div>
+
+                    {getActiveWankelTurboStages(config).length >= 2 && (
+                      <div className="flex flex-wrap gap-1.5 text-[10px]">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setConfig((p) => ({
+                              ...p,
+                              turboArRatio: 0.65,
+                              turboStagesArRatios: [0.65, 0.65, 0.65, 0.65],
+                              turboStagesDiametersMm: [52, 52, 52, 52],
+                            }))
+                          }
+                          className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 cursor-pointer"
+                        >
+                          Preset: Simmetriche (52mm)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setConfig((p) => ({
+                              ...p,
+                              turboArRatio: 0.72,
+                              turboStagesArRatios: [0.42, 0.95, 0.45, 1.0],
+                              turboStagesDiametersMm: [42, 68, 45, 72],
+                            }))
+                          }
+                          className="px-2 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/60 text-amber-200 font-bold cursor-pointer"
+                        >
+                          Preset: Sequenziale Asimmetrico (42mm + 68mm)
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                    {getActiveWankelTurboStages(config).map((stage) => {
+                      const roleDesc =
+                        stage.diamMm <= 48
+                          ? 'Piccola (Spool istantaneo ai bassi)'
+                          : stage.diamMm <= 64
+                            ? 'Media (Bilanciata)'
+                            : 'Grande (Massima portata agli alti)';
+
+                      return (
+                        <div
+                          key={stage.index}
+                          className="p-3 rounded-lg bg-slate-900 border border-slate-800 space-y-2.5"
+                        >
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="font-bold text-sky-300">
+                              Turbina #{stage.index + 1}{' '}
+                              <span className="text-[10px] font-normal text-slate-400">
+                                ({roleDesc})
+                              </span>
+                            </span>
+                            <span className="font-bold text-amber-300 font-mono">
+                              Ø {stage.diamMm} mm • A/R {stage.ar.toFixed(2)}
+                            </span>
+                          </div>
+
+                          {/* Slider Diametro Girante Compressore */}
+                          <div className="space-y-1">
+                            <div className="flex justify-between text-[10px] text-slate-400">
+                              <span>Diametro Girante Compressore:</span>
+                              <span className="text-slate-200 font-bold">{stage.diamMm} mm</span>
+                            </div>
+                            <input
+                              type="range"
+                              min={35}
+                              max={90}
+                              step={1}
+                              value={stage.diamMm}
+                              onChange={(e) => {
+                                const newDiam = Number(e.target.value);
+                                setConfig((p) => {
+                                  const nextDiam = [
+                                    ...(p.turboStagesDiametersMm ?? [52, 52, 52, 52]),
+                                  ];
+                                  nextDiam[stage.index] = newDiam;
+                                  const nextAr = [
+                                    ...(p.turboStagesArRatios ?? [0.65, 0.65, 0.65, 0.65]),
+                                  ];
+                                  nextAr[stage.index] = impellerMmToArRatio(newDiam);
+                                  const activeCount =
+                                    TURBO_COUNT_CONFIGS.find(
+                                      (tc) => tc.id === p.turboCountConfig,
+                                    )?.turbineCount ?? 1;
+                                  const avgAr =
+                                    nextAr
+                                      .slice(0, activeCount)
+                                      .reduce((s, v) => s + v, 0) / activeCount;
+                                  return {
+                                    ...p,
+                                    turboArRatio: Number(avgAr.toFixed(2)),
+                                    turboStagesDiametersMm: nextDiam,
+                                    turboStagesArRatios: nextAr,
+                                  };
+                                });
+                              }}
+                              className="w-full"
+                            />
+                            <div className="flex justify-between text-[9px] text-slate-500">
+                              <span>Ø 35mm (Spool rapido)</span>
+                              <span>Ø 90mm (High Flow)</span>
+                            </div>
+                          </div>
+
+                          {/* Slider Rapporto A/R Turbina Scarico */}
+                          <div className="space-y-1">
+                            <div className="flex justify-between text-[10px] text-slate-400">
+                              <span>Rapporto A/R Alloggiamento Scarico:</span>
+                              <span className="text-slate-200 font-bold">
+                                {stage.ar.toFixed(2)}
+                              </span>
+                            </div>
+                            <input
+                              type="range"
+                              min={0.35}
+                              max={1.3}
+                              step={0.05}
+                              value={stage.ar}
+                              onChange={(e) => {
+                                const newAr = Number(e.target.value);
+                                setConfig((p) => {
+                                  const nextAr = [
+                                    ...(p.turboStagesArRatios ?? [0.65, 0.65, 0.65, 0.65]),
+                                  ];
+                                  nextAr[stage.index] = newAr;
+                                  const nextDiam = [
+                                    ...(p.turboStagesDiametersMm ?? [52, 52, 52, 52]),
+                                  ];
+                                  nextDiam[stage.index] = arRatioToImpellerMm(newAr);
+                                  const activeCount =
+                                    TURBO_COUNT_CONFIGS.find(
+                                      (tc) => tc.id === p.turboCountConfig,
+                                    )?.turbineCount ?? 1;
+                                  const avgAr =
+                                    nextAr
+                                      .slice(0, activeCount)
+                                      .reduce((s, v) => s + v, 0) / activeCount;
+                                  return {
+                                    ...p,
+                                    turboArRatio: Number(avgAr.toFixed(2)),
+                                    turboStagesArRatios: nextAr,
+                                    turboStagesDiametersMm: nextDiam,
+                                  };
+                                });
+                              }}
+                              className="w-full"
+                            />
+                            <div className="flex justify-between text-[9px] text-slate-500">
+                              <span>0.35 A/R (Poco ritardo)</span>
+                              <span>1.30 A/R (Allungo libero)</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
@@ -1223,7 +1462,11 @@ export const WankelEngineDesigner1B: React.FC<WankelEngineDesignerProps> = ({
               redlineRpm={telemetry.redlineRpm}
               engineName={engineName}
               displacementLiters={geometry.displacementLiters}
-              architectureLabel={`${config.rotorCount}-Rotori Wankel`}
+              architectureLabel={
+                config.rotorCount === 1
+                  ? '1 Rotore Wankel'
+                  : `${config.rotorCount} Rotori Wankel`
+              }
             />
 
             {/* Metriche Wankel */}

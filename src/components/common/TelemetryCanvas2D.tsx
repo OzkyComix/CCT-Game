@@ -227,7 +227,7 @@ export const TelemetryCanvas2D: React.FC<TelemetryCanvas2DProps> = ({
       <div className="px-3.5 py-2 border-b border-slate-800/90 bg-slate-900/70 flex flex-wrap items-center justify-between gap-2 font-mono text-[11px]">
         <div className="flex items-center gap-2 min-w-0">
           <span className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold shrink-0">
-            {displacementLiters.toFixed(1)}L {architectureLabel ?? ''}
+            {displacementLiters.toFixed(1)}L • {architectureLabel ?? ''}
           </span>
           <span className="font-bold text-slate-200 truncate" title={engineName}>
             {engineName.toUpperCase()}
