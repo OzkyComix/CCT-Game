@@ -56,7 +56,6 @@ export interface PistonEngineConfigInput {
   turboArRatio: number;
   /** Diametro/A/R individuale per ciascuna turbina (Single=1, Twin=2, Triple=3, Quad=4) */
   turboStagesArRatios: number[];
-  turboStagesDiametersMm?: number[];
   boostPressureBar: number;
   turboPosition: TurboPosition;
   catalystEra: CatalystEra;
@@ -82,39 +81,22 @@ export function arRatioToImpellerMm(arRatio: number): number {
   return Math.round(30 + arRatio * 44);
 }
 
-/** Converte il diametro girante compressore (mm) in rapporto A/R equivalente */
-export function impellerMmToArRatio(diamMm: number): number {
-  return Number(Math.min(1.4, Math.max(0.35, (diamMm - 30) / 44)).toFixed(2));
-}
-
-export interface TurboStageInfo {
-  index: number;
-  ar: number;
-  diamMm: number;
-}
-
-/** Restituisce l'array dei parametri per ciascuna singola turbina attiva (Diametro mm e A/R) */
-export function getActiveTurboStages(config: PistonEngineConfigInput): TurboStageInfo[] {
+/** Restituisce l'array normalizzato dei rapporti A/R per il numero effettivo di turbine attive */
+export function getActiveTurboStagesAr(config: PistonEngineConfigInput): number[] {
   const countSpec =
     TURBO_COUNT_CONFIGS.find((tc) => tc.id === config.turboCountConfig) ??
     TURBO_COUNT_CONFIGS[0];
   const n = countSpec.turbineCount;
-  const rawAr = config.turboStagesArRatios ?? [];
-  const rawDiam = config.turboStagesDiametersMm ?? [];
-  const result: TurboStageInfo[] = [];
+  const raw = config.turboStagesArRatios ?? [];
+  const result: number[] = [];
   for (let i = 0; i < n; i++) {
-    let ar = rawAr[i] !== undefined ? rawAr[i] : (config.turboArRatio || 0.65);
-    let diamMm = rawDiam[i] !== undefined ? rawDiam[i] : arRatioToImpellerMm(ar);
-    ar = Math.min(1.4, Math.max(0.35, ar));
-    diamMm = Math.min(95, Math.max(35, diamMm));
-    result.push({ index: i, ar, diamMm });
+    result.push(
+      raw[i] !== undefined
+        ? Math.min(1.4, Math.max(0.35, raw[i]))
+        : Math.min(1.4, Math.max(0.35, config.turboArRatio || 0.65)),
+    );
   }
   return result;
-}
-
-/** Restituisce l'array normalizzato dei rapporti A/R per il numero effettivo di turbine attive */
-export function getActiveTurboStagesAr(config: PistonEngineConfigInput): number[] {
-  return getActiveTurboStages(config).map((s) => s.ar);
 }
 
 /**
@@ -458,10 +440,10 @@ export function calculateEngineCosts(config: PistonEngineConfigInput): {
     archSpec.productionComplexityMultiplier *
     tierProductionMultiplier[config.priceTier];
 
-  // Costo scalare per ogni singola turbina in base al suo diametro mm e A/R individuale
+  // Costo scalare per ogni singola turbina in base al suo diametro/A/R individuale
   let turboSystemUnitCost = 0;
   if (config.turboType !== 'NaturallyAspirated') {
-    const activeStages = getActiveTurboStages(config);
+    const activeStages = getActiveTurboStagesAr(config);
     const tierTurboMultiplier: Record<PriceTier, number> = {
       Economica: 0.52,
       Media: 1.0,
@@ -473,15 +455,12 @@ export function calculateEngineCosts(config: PistonEngineConfigInput): {
     // Se le turbine hanno diametri diversi (asimmetriche/sequenziali), c'è un +12% per le valvole di bypass stadio
     const isAsymmetricSequential =
       activeStages.length >= 2 &&
-      Math.max(...activeStages.map((s) => s.diamMm)) -
-        Math.min(...activeStages.map((s) => s.diamMm)) >=
-        6;
+      Math.max(...activeStages) - Math.min(...activeStages) >= 0.12;
     const sequentialValveCostMultiplier = isAsymmetricSequential ? 1.12 : 1.0;
 
-    const sumStageCosts = activeStages.reduce((acc, stage) => {
-      const diamScaling = Math.pow(stage.diamMm / 55, 1.35);
-      const arScaling = Math.pow(stage.ar / 0.65, 0.45);
-      return acc + turboSpec.baseUnitCost * diamScaling * arScaling;
+    const sumStageCosts = activeStages.reduce((acc, stageAr) => {
+      const arCostScaling = Math.pow(Math.max(0.35, stageAr) / 0.55, 1.42);
+      return acc + turboSpec.baseUnitCost * arCostScaling;
     }, 0);
 
     turboSystemUnitCost = Math.round(
@@ -770,7 +749,6 @@ export function simulatePistonEngineDyno(
           archFlowModifier;
       } else {
         // Calcolo combinato di ogni singola turbina (incluso E-Turbo!) in base al suo diametro/A/R individuale e al numero totale di turbine
-        const activeStages = getActiveTurboStages(config);
         const bearingSpoolBonusRpm =
           config.turboBearingType === 'BallBearing' ? -360 : 0;
         const hotVSpoolBonusRpm = config.turboPosition === 'HotV' ? -240 : 0;
@@ -779,17 +757,14 @@ export function simulatePistonEngineDyno(
         let sumStageSpool = 0;
         let sumStageHighFlow = 0;
 
-        activeStages.forEach((stage) => {
-          const inertiaDelta = (stage.diamMm - 50) * 36;
-          const arDelta = (stage.ar - 0.65) * 1200;
+        activeTurboStagesAr.forEach((stageAr) => {
           const stageSpoolRpm = Math.max(
             1200,
             turboSpec.spoolRpmBase +
               bearingSpoolBonusRpm +
               hotVSpoolBonusRpm +
               turboCountSpec.spoolRpmBonus +
-              inertiaDelta +
-              arDelta,
+              (stageAr - 0.65) * 2100,
           );
 
           const stageSigmoid = 1 / (1 + Math.exp(-(rpm - stageSpoolRpm) / 460));
@@ -799,13 +774,10 @@ export function simulatePistonEngineDyno(
           // Regime oltre il quale la singola turbina inizia a murare per portata:
           // Con più turbine (Twin/Triple/Quad), ogni turbina alimenta meno cilindri e quindi mura molto più in alto!
           const perTurbineDisplacementLiters =
-            exactLiters / activeStages.length;
+            exactLiters / activeTurboStagesAr.length;
           const displacementChokeShiftRpm = (1.5 - perTurbineDisplacementLiters) * 680;
           const stageChokeRpm =
-            4800 +
-            (stage.diamMm - 35) * 75 +
-            stage.ar * 2100 +
-            displacementChokeShiftRpm;
+            4700 + stageAr * 3500 + displacementChokeShiftRpm;
 
           const stageHighRollOff =
             rpm > stageChokeRpm
@@ -817,16 +789,14 @@ export function simulatePistonEngineDyno(
           sumStageHighFlow += stageHighRollOff;
         });
 
-        const avgStageSpool = sumStageSpool / activeStages.length;
-        const avgStageHighFlow = sumStageHighFlow / activeStages.length;
+        const avgStageSpool = sumStageSpool / activeTurboStagesAr.length;
+        const avgStageHighFlow = sumStageHighFlow / activeTurboStagesAr.length;
 
         // Se le turbine hanno taglie diverse (es. Turbina #1 piccola + Turbina #2 grande),
         // la piccola garantisce lo spool immediato ai bassi e la grande la portata agli alti!
         const isAsymmetricStages =
-          activeStages.length >= 2 &&
-          Math.max(...activeStages.map((s) => s.diamMm)) -
-            Math.min(...activeStages.map((s) => s.diamMm)) >=
-            6;
+          activeTurboStagesAr.length >= 2 &&
+          Math.max(...activeTurboStagesAr) - Math.min(...activeTurboStagesAr) >= 0.1;
 
         const exhaustDrivenSpool = isAsymmetricStages
           ? 0.72 * fastestStageSpool + 0.28 * avgStageSpool

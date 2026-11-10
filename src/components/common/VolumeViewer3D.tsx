@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import {
   type PistonEngineConfigInput,
-  getActiveTurboStages,
+  arRatioToImpellerMm,
+  getActiveTurboStagesAr,
 } from '../../math/engineMath';
 import {
   type WankelEngineConfigInput,
@@ -352,15 +353,16 @@ function buildProceduralEngineMeshGroup(
 
   // 3. Turbocompressori Procedurali Dettagliati (separati fisicamente, con diametro mm reale per ciascuno)
   if (config.turboType !== 'NaturallyAspirated') {
-    const activeStages = getActiveTurboStages(config);
-    const count = activeStages.length;
+    const activeStagesAr = getActiveTurboStagesAr(config);
+    const count = activeStagesAr.length;
     const isHotV = config.turboPosition === 'HotV';
 
     if (config.turboPosition === 'Front') {
       const spacingZ = Math.max(0.18, (W * 0.55) / Math.max(1, count - 1));
       for (let i = 0; i < count; i++) {
         const zOff = count === 1 ? 0 : (i - (count - 1) / 2) * spacingZ;
-        const tMesh = createDetailedTurboMesh(activeStages[i].diamMm, false);
+        const diamMm = arRatioToImpellerMm(activeStagesAr[i]);
+        const tMesh = createDetailedTurboMesh(diamMm, false);
         tMesh.position.set(blockCoreLength / 2 + 0.08, -H * 0.05, zOff);
         engineRoot.add(tMesh);
       }
@@ -370,7 +372,8 @@ function buildProceduralEngineMeshGroup(
       for (let i = 0; i < count; i++) {
         const xOff = count === 1 ? 0 : (i - (count - 1) / 2) * spacingX;
         const zOff = count >= 2 ? (i % 2 === 0 ? -0.028 : 0.028) : 0;
-        const tMesh = createDetailedTurboMesh(activeStages[i].diamMm, isHotV);
+        const diamMm = arRatioToImpellerMm(activeStagesAr[i]);
+        const tMesh = createDetailedTurboMesh(diamMm, isHotV);
         tMesh.position.set(xOff, H * 0.17, zOff);
         engineRoot.add(tMesh);
       }
@@ -398,7 +401,8 @@ function buildProceduralEngineMeshGroup(
           const spacingX = Math.max(0.2, (blockCoreLength * 0.72) / Math.max(1, count - 1));
           xOff = count === 1 ? 0 : (i - (count - 1) / 2) * spacingX;
         }
-        const tMesh = createDetailedTurboMesh(activeStages[i].diamMm, false);
+        const diamMm = arRatioToImpellerMm(activeStagesAr[i]);
+        const tMesh = createDetailedTurboMesh(diamMm, false);
         tMesh.position.set(xOff, -H * 0.07, side * (W * 0.44));
         engineRoot.add(tMesh);
       }
