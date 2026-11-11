@@ -2544,81 +2544,168 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
             </div>
           </section>
 
-          {/* VISUALIZZATORE CAD 3D E COLLISIONE VANO MOTORE */}
-          <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-              <div className="flex items-center gap-2">
-                <Box className="w-4 h-4 text-sky-400" />
-                <h3 className="text-xs font-bold font-mono uppercase tracking-wider text-slate-200">
-                  CAD 3D & Ingombro Vano Motore
-                </h3>
-              </div>
-              <div className="flex items-center gap-2 font-mono text-xs">
-                <label className="text-[11px] text-slate-400">Orientamento:</label>
-                <select
-                  value={intendedOrientation}
-                  onChange={(e) => setIntendedOrientation(e.target.value as EngineOrientation)}
-                  className="px-2 py-0.5 rounded bg-slate-950 border border-slate-700 text-sky-300 text-xs"
-                >
-                  <option value="Trasversale">Trasversale</option>
-                  <option value="Longitudinale">Longitudinale</option>
-                </select>
-              </div>
-            </div>
-
-            <VolumeViewer3D
-              engineInBayDimensionsMm={geometry.engineBayDimensionsMm}
-              rawEngineDimensionsMm={geometry.engineBayDimensionsMm}
-              electricConfig={effectiveConfig}
-              engineType="ElectricHybrid"
-              overlaidChassisBays={overlaidChassisBays}
-            />
-
-            <div className="space-y-2 font-mono text-xs">
-              <div className="flex items-center justify-between text-[11px] text-slate-400 uppercase">
-                <span className="flex items-center gap-1.5">
-                  <Layers className="w-3.5 h-3.5 text-sky-400" />
-                  <span>Seleziona Pianali da Sovrapporre nel 3D:</span>
-                </span>
-                <span>
-                  Vano: {geometry.engineBayDimensionsMm.lengthMm}×
-                  {geometry.engineBayDimensionsMm.widthMm}×
-                  {geometry.engineBayDimensionsMm.heightMm} mm
+          {/* VISUALIZZATORE CAD 3D E COLLISIONE VANO MOTORE (ADATTIVO AI 3 PANNELLI) */}
+          {activeSubPanel === 'motor' ? (
+            <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                <div className="flex items-center gap-2">
+                  <Box className="w-4 h-4 text-sky-400" />
+                  <h3 className="text-xs font-bold font-mono uppercase tracking-wider text-slate-200">
+                    CAD 3D Singola Unità Macchina Elettrica (1.0×)
+                  </h3>
+                </div>
+                <span className="text-[11px] font-mono text-sky-300 font-semibold">
+                  {unitMotor.dimensionsMm.lengthMm}×{unitMotor.dimensionsMm.widthMm}×{unitMotor.dimensionsMm.heightMm} mm
                 </span>
               </div>
-              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                {chassisCompatibilityList.map((item) => {
-                  const isChecked = selectedChassisIds.includes(item.chassis.id);
-                  return (
-                    <label
-                      key={item.chassis.id}
-                      className={`p-2 rounded border flex items-center justify-between cursor-pointer transition ${
-                        item.isCompatible
-                          ? 'border-emerald-900/60 bg-emerald-950/20 text-emerald-200'
-                          : 'border-red-900/60 bg-red-950/20 text-red-200'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => toggleChassisSelection(item.chassis.id)}
-                          className="rounded accent-sky-500 cursor-pointer"
-                        />
-                        <span className="font-bold">{item.chassis.name}</span>
-                        <span className="text-[10px] text-slate-400">
-                          ({item.chassis.codeName})
+
+              <VolumeViewer3D
+                engineInBayDimensionsMm={unitMotor.dimensionsMm}
+                rawEngineDimensionsMm={unitMotor.dimensionsMm}
+                electricConfig={{
+                  ...config,
+                  systemType: 'PureEV',
+                  motorCount: 1,
+                }}
+                engineType="ElectricHybrid"
+                overlaidChassisBays={[]}
+              />
+
+              <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 font-mono text-xs space-y-1.5 text-slate-300">
+                <div className="text-[11px] text-sky-400 font-bold uppercase tracking-wider">
+                  Specifiche Involucro Macchina Indipendente (Universale)
+                </div>
+                <div className="flex justify-between text-[11px]">
+                  <span className="text-slate-400">Diametro Esterno Totale:</span>
+                  <span className="font-semibold text-slate-200">{unitMotor.dimensionsMm.widthMm} mm (Statore Ø{config.statorDiameterMm} mm)</span>
+                </div>
+                <div className="flex justify-between text-[11px]">
+                  <span className="text-slate-400">Lunghezza Assiale Totale:</span>
+                  <span className="font-semibold text-slate-200">{unitMotor.dimensionsMm.lengthMm} mm (Rotore {config.rotorLengthMm} mm)</span>
+                </div>
+                <div className="flex justify-between text-[11px]">
+                  <span className="text-slate-400">Volume Inviluppo Cilindrico:</span>
+                  <span className="font-semibold text-amber-300">{(unitMotor.statorVolumeCc / 1000).toFixed(2)} Litri</span>
+                </div>
+                <div className="text-[10px] text-slate-400 italic pt-1 border-t border-slate-800/80">
+                  * Unità autonoma priva di vincoli di asse o vano motore: nessun selettore trasversale/longitudinale o anteriore/posteriore. L'orientamento e l'alloggiamento nel telaio si simulano nel Pannello 3 (Banco Prova).
+                </div>
+              </div>
+            </section>
+          ) : activeSubPanel === 'battery' ? (
+            <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                <div className="flex items-center gap-2">
+                  <Box className="w-4 h-4 text-emerald-400" />
+                  <h3 className="text-xs font-bold font-mono uppercase tracking-wider text-slate-200">
+                    Ingombro Strutturale Pacco Batteria
+                  </h3>
+                </div>
+                <span className="text-[11px] font-mono text-emerald-300 font-semibold">
+                  {batteryPack.dimensionsMm.lengthMm}×{batteryPack.dimensionsMm.widthMm}×{batteryPack.dimensionsMm.heightMm} mm
+                </span>
+              </div>
+
+              <div className="p-4 rounded-lg bg-slate-950 border border-slate-800 font-mono text-xs space-y-3">
+                <div className="flex items-center justify-between text-emerald-400 font-bold border-b border-slate-800 pb-2">
+                  <span>Alloggiamento Pianale Skateboard / Tunnel</span>
+                  <span>{batteryPack.weightKg} kg</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-[11px] text-center">
+                  <div className="p-2 rounded bg-slate-900 border border-slate-800">
+                    <span className="text-slate-400 block text-[10px]">Lunghezza:</span>
+                    <span className="font-bold text-slate-200">{batteryPack.dimensionsMm.lengthMm} mm</span>
+                  </div>
+                  <div className="p-2 rounded bg-slate-900 border border-slate-800">
+                    <span className="text-slate-400 block text-[10px]">Larghezza:</span>
+                    <span className="font-bold text-slate-200">{batteryPack.dimensionsMm.widthMm} mm</span>
+                  </div>
+                  <div className="p-2 rounded bg-slate-900 border border-slate-800">
+                    <span className="text-slate-400 block text-[10px]">Spessore/H:</span>
+                    <span className="font-bold text-slate-200">{batteryPack.dimensionsMm.heightMm} mm</span>
+                  </div>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Il pacco accumulatori è integrato come elemento strutturale nel pianale dell'autotelaio (Skateboard Floorpan o tunnel centrale). Non occupa il vano motore anteriore/posteriore e non è soggetto a vincoli di orientamento trasversale/longitudinale del gruppo propulsore.
+                </p>
+              </div>
+            </section>
+          ) : (
+            <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                <div className="flex items-center gap-2">
+                  <Box className="w-4 h-4 text-sky-400" />
+                  <h3 className="text-xs font-bold font-mono uppercase tracking-wider text-slate-200">
+                    CAD 3D & Ingombro Vano Motore Powertrain
+                  </h3>
+                </div>
+                <div className="flex items-center gap-2 font-mono text-xs">
+                  <label className="text-[11px] text-slate-400">Orientamento:</label>
+                  <select
+                    value={intendedOrientation}
+                    onChange={(e) => setIntendedOrientation(e.target.value as EngineOrientation)}
+                    className="px-2 py-0.5 rounded bg-slate-950 border border-slate-700 text-sky-300 text-xs"
+                  >
+                    <option value="Trasversale">Trasversale</option>
+                    <option value="Longitudinale">Longitudinale</option>
+                  </select>
+                </div>
+              </div>
+
+              <VolumeViewer3D
+                engineInBayDimensionsMm={geometry.engineBayDimensionsMm}
+                rawEngineDimensionsMm={geometry.engineBayDimensionsMm}
+                electricConfig={effectiveConfig}
+                engineType="ElectricHybrid"
+                overlaidChassisBays={overlaidChassisBays}
+              />
+
+              <div className="space-y-2 font-mono text-xs">
+                <div className="flex items-center justify-between text-[11px] text-slate-400 uppercase">
+                  <span className="flex items-center gap-1.5">
+                    <Layers className="w-3.5 h-3.5 text-sky-400" />
+                    <span>Seleziona Pianali da Sovrapporre nel 3D:</span>
+                  </span>
+                  <span>
+                    Vano: {geometry.engineBayDimensionsMm.lengthMm}×
+                    {geometry.engineBayDimensionsMm.widthMm}×
+                    {geometry.engineBayDimensionsMm.heightMm} mm
+                  </span>
+                </div>
+                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                  {chassisCompatibilityList.map((item) => {
+                    const isChecked = selectedChassisIds.includes(item.chassis.id);
+                    return (
+                      <label
+                        key={item.chassis.id}
+                        className={`p-2 rounded border flex items-center justify-between cursor-pointer transition ${
+                          item.isCompatible
+                            ? 'border-emerald-900/60 bg-emerald-950/20 text-emerald-200'
+                            : 'border-red-900/60 bg-red-950/20 text-red-200'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => toggleChassisSelection(item.chassis.id)}
+                            className="rounded accent-sky-500 cursor-pointer"
+                          />
+                          <span className="font-bold">{item.chassis.name}</span>
+                          <span className="text-[10px] text-slate-400">
+                            ({item.chassis.codeName})
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-bold">
+                          {item.isCompatible ? '✓ COMPATIBILE' : '✗ INCOMPATIBILE'}
                         </span>
-                      </div>
-                      <span className="text-[10px] font-bold">
-                        {item.isCompatible ? '✓ COMPATIBILE' : '✗ INCOMPATIBILE'}
-                      </span>
-                    </label>
-                  );
-                })}
+                      </label>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          </section>
+            </section>
+          )}
         </div>
       </div>
     </div>
