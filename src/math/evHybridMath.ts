@@ -10,13 +10,22 @@ import {
   VOLTAGE_ARCHITECTURES,
 } from '../data/electricHybridData';
 import type {
+  BatteryPackSpec,
+  BatteryPackTelemetry,
+  BenchElectricDriveArrangement,
+  BenchElectricMotorCount,
   CoupledIceEngineOption,
   DimensionsLWH,
   DualCurrencyCost,
   DynoCurvePoint,
   ElectricHybridEngineConfigInput,
   ElectricHybridSpecs,
+  ElectricMotorSpec,
   EngineDynoTelemetry,
+  HybridSystemType,
+  MotorLayoutConfig,
+  PowertrainBenchConfig,
+  SingleElectricMotorTelemetry,
 } from '../types/gameTypes';
 
 export interface ElectricHybridGeometryMetrics {
@@ -25,15 +34,21 @@ export interface ElectricHybridGeometryMetrics {
   inverterDimensionsMm: DimensionsLWH;
   /** Ingombro complessivo del gruppo propulsore nel vano motore per la verifica collisione (mm) */
   engineBayDimensionsMm: DimensionsLWH;
-  /** Volume attivo statore/rotore in cm³ (cc) */
+  /** Volume attivo statore/rotore della singola unità motrice in cm³ (cc) */
   statorVolumeCc: number;
 }
 
 export interface EvHybridSimulationResult extends EngineDynoTelemetry {
   specs: ElectricHybridSpecs;
+  /** Telemetria isolata della singola unità motore elettrico universale (1.0x) */
+  singleMotorTelemetry: SingleElectricMotorTelemetry;
+  /** Telemetria isolata del pacco batteria indipendente */
+  batteryPackTelemetry: BatteryPackTelemetry;
+  /** Configurazione separata del simulatore di test al banco */
+  benchConfig: PowertrainBenchConfig;
   /** Curva del solo motore termico/Wankel (per grafico ibrido combinato) */
   iceOnlyCurve?: DynoCurvePoint[];
-  /** Curva del solo contributo elettrico (per grafico ibrido combinato) */
+  /** Curva del solo comparto elettrico (per grafico ibrido combinato) */
   electricOnlyCurve?: DynoCurvePoint[];
   /** Motore termico/Wankel effettivamente accoppiato */
   coupledIceOption?: CoupledIceEngineOption;
@@ -50,11 +65,13 @@ function sampleCurveAtRpm(
     return { torqueNm: 0, powerHp: 0 };
   }
   if (targetRpm <= curve[0].rpm) {
-    return { torqueNm: curve[0].torqueNm, powerHp: curve[0].powerHp };
+    const torqueNm = curve[0].torqueNm;
+    return { torqueNm, powerHp: Math.round((torqueNm * targetRpm) / 7023.5) };
   }
   const last = curve[curve.length - 1];
   if (targetRpm >= last.rpm) {
-    return { torqueNm: last.torqueNm, powerHp: last.powerHp };
+    const torqueNm = last.torqueNm;
+    return { torqueNm, powerHp: Math.round((torqueNm * targetRpm) / 7023.5) };
   }
 
   for (let i = 0; i < curve.length - 1; i++) {
@@ -68,93 +85,974 @@ function sampleCurveAtRpm(
       return { torqueNm, powerHp };
     }
   }
-  return { torqueNm: last.torqueNm, powerHp: last.powerHp };
+  return {
+    torqueNm: last.torqueNm,
+    powerHp: Math.round((last.torqueNm * targetRpm) / 7023.5),
+  };
+}
+
+// ============================================================================
+// 1. SEPARAZIONE ARCHITETTURALE: ESTRATTORI STATO (MOTORE SINGOLO / BATTERIA / BANCO)
+// ============================================================================
+
+/**
+ * Estrae la specifica pura della singola unità motore elettrico universale (`ElectricMotorSpec`),
+ * rimuovendo qualsiasi parametro di posizionamento (Anteriore/Posteriore) o orientamento (Trasversale/Longitudinale).
+ */
+export function extractElectricMotorSpec(
+  input: ElectricHybridEngineConfigInput | PowertrainBenchConfig | ElectricMotorSpec,
+): ElectricMotorSpec {
+  if ('motor' in input && input.motor) {
+    return { ...input.motor };
+  }
+  if ('motorSpec' in input && input.motorSpec) {
+    return { ...input.motorSpec };
+  }
+  const cfg = input as ElectricMotorSpec & Partial<ElectricHybridEngineConfigInput>;
+  return {
+    electricMotorType: cfg.electricMotorType,
+    statorDiameterMm: cfg.statorDiameterMm,
+    rotorLengthMm: cfg.rotorLengthMm,
+    voltageArchitecture: cfg.voltageArchitecture,
+    coolingSystem: cfg.coolingSystem,
+    priceTier: cfg.priceTier,
+    referenceClass: cfg.referenceClass,
+    maxMotorRpm: cfg.maxMotorRpm,
+  };
 }
 
 /**
- * Calcola l'ingombro tridimensionale (LWH mm) dei motori elettrici, dell'inverter,
- * del pacco batterie e del gruppo propulsore complessivo installato nel vano motore.
+ * Estrae la specifica pura del pacco batteria indipendente (`BatteryPackSpec`),
+ * valutabile e salvabile separatamente.
  */
-export function calculateElectricHybridGeometryAndDimensions(
-  config: ElectricHybridEngineConfigInput,
-  coupledIce?: CoupledIceEngineOption,
-): ElectricHybridGeometryMetrics {
-  const Ds = Math.max(140, Math.min(360, config.statorDiameterMm));
-  const Lr = Math.max(70, Math.min(300, config.rotorLengthMm));
+export function extractBatteryPackSpec(
+  input: ElectricHybridEngineConfigInput | PowertrainBenchConfig | BatteryPackSpec,
+): BatteryPackSpec {
+  if ('battery' in input && input.battery) {
+    return { ...input.battery };
+  }
+  if ('batterySpec' in input && input.batterySpec) {
+    return { ...input.batterySpec };
+  }
+  const cfg = input as BatteryPackSpec & Partial<ElectricHybridEngineConfigInput>;
+  return {
+    batteryChemistry: cfg.batteryChemistry,
+    batteryCapacityKwh: cfg.batteryCapacityKwh,
+    voltageArchitecture: cfg.voltageArchitecture,
+    coolingSystem: cfg.coolingSystem,
+    priceTier: cfg.priceTier,
+    referenceClass: cfg.referenceClass,
+  };
+}
 
-  // FIX SCALA: Ds/20 è il raggio in cm, Lr/10 è la lunghezza in cm -> il prodotto è GIÀ in cm³ (cc)!
+/**
+ * Converte una configurazione UI o banco prova in un `PowertrainBenchConfig` normalizzato,
+ * separando nettamente:
+ * - `motor`: `ElectricMotorSpec` (singola unità universale)
+ * - `battery`: `BatteryPackSpec` (pacco batteria indipendente)
+ * - configurazione del banco (`motorCount`: 1, 2, 3 o 4 motori, `hasMechanicalAwdShaft` con -8% perdita,
+ *   `systemType` e `coupledIceOptionId`).
+ */
+export function toPowertrainBenchConfig(
+  input: ElectricHybridEngineConfigInput | PowertrainBenchConfig,
+): PowertrainBenchConfig {
+  if ('motor' in input && 'battery' in input) {
+    const motorCount = Math.max(1, Math.min(4, input.motorCount || 1)) as BenchElectricMotorCount;
+    const hasMechanicalAwdShaft =
+      Boolean(input.hasMechanicalAwdShaft) ||
+      input.benchArrangement === 'Single_MechanicalAWD' ||
+      input.motorLayout === 'SingleMotor_MechanicalAWD';
+    return {
+      ...input,
+      motorCount: hasMechanicalAwdShaft ? 1 : motorCount,
+      hasMechanicalAwdShaft,
+    };
+  }
+
+  const motor = extractElectricMotorSpec(input);
+  const battery = extractBatteryPackSpec(input);
+  const layoutSpec =
+    MOTOR_LAYOUT_CONFIGS.find((l) => l.id === input.motorLayout) ??
+    MOTOR_LAYOUT_CONFIGS[0];
+
+  const hasMechanicalAwdShaft =
+    Boolean(input.hasMechanicalAwdShaft) ||
+    input.motorLayout === 'SingleMotor_MechanicalAWD';
+
+  const motorCount = (
+    hasMechanicalAwdShaft
+      ? 1
+      : input.motorCount ?? layoutSpec.motorCount
+  ) as BenchElectricMotorCount;
+
+  const benchArrangement: BenchElectricDriveArrangement = hasMechanicalAwdShaft
+    ? 'Single_MechanicalAWD'
+    : motorCount === 4
+      ? 'Quad_4x'
+      : motorCount === 3
+        ? 'Tri_3x'
+        : motorCount === 2
+          ? 'Dual_2x'
+          : 'Single_1x';
+
+  return {
+    systemType: input.systemType,
+    motorCount,
+    hasMechanicalAwdShaft,
+    benchArrangement,
+    motorLayout: input.motorLayout,
+    hasFrontDisconnect: input.hasFrontDisconnect,
+    gearboxType: input.gearboxType,
+    gearRatio: input.gearRatio,
+    coupledIceOptionId: input.coupledIceOptionId,
+    motor,
+    battery,
+  };
+}
+
+/**
+ * Restituisce il moltiplicatore di scala al banco per motori elettrici uguali:
+ * - Single (1 motore) = 1.0x
+ * - Single + Albero di trasmissione meccanico AWD = 0.92x (-8% di perdita meccanica)
+ * - Dual (2 motori) = 2.0x
+ * - Tri (3 motori) = 3.0x
+ * - Quad (4 motori) = 4.0x
+ */
+export function getBenchLinearMotorScale(bench: PowertrainBenchConfig): {
+  motorCount: BenchElectricMotorCount;
+  hasMechanicalAwdShaft: boolean;
+  drivetrainEfficiencyFactor: number;
+  linearOutputMultiplier: number;
+} {
+  const hasMechanicalAwdShaft =
+    Boolean(bench.hasMechanicalAwdShaft) ||
+    bench.benchArrangement === 'Single_MechanicalAWD' ||
+    bench.motorLayout === 'SingleMotor_MechanicalAWD';
+
+  const motorCount: BenchElectricMotorCount = hasMechanicalAwdShaft
+    ? 1
+    : (Math.max(1, Math.min(4, bench.motorCount || 1)) as BenchElectricMotorCount);
+
+  // Perdita meccanica del -8% (0.92x) solo se si usa 1 singolo motore con albero di trasmissione meccanico AWD;
+  // per 1, 2, 3 o 4 motori elettrici diretti la scala è esattamente lineare: 1.0x, 2.0x, 3.0x, 4.0x!
+  const drivetrainEfficiencyFactor = hasMechanicalAwdShaft ? 0.92 : 1.0;
+  const linearOutputMultiplier = Number((motorCount * drivetrainEfficiencyFactor).toFixed(4));
+
+  return {
+    motorCount,
+    hasMechanicalAwdShaft,
+    drivetrainEfficiencyFactor,
+    linearOutputMultiplier,
+  };
+}
+
+// ============================================================================
+// 2. COMPONENTE 1: SINGOLA UNITÀ MOTORE ELETTRICO UNIVERSALE (`ElectricMotorSpec`)
+// ============================================================================
+
+/**
+ * Calcola tutte le specifiche fisiche, geometriche, telemetriche e di costo di UNA SINGOLA
+ * unità motore elettrico universale (`ElectricMotorSpec`, scala 1.0x).
+ * - Dipende SOLO da tecnologia, diametro statore, lunghezza rotore, tensione, raffreddamento,
+ *   fascia prezzo e classe.
+ * - Nessun parametro di posizionamento (Anteriore/Posteriore) o orientamento (Trasversale/Longitudinale)
+ *   influenza le prestazioni o il prezzo del singolo motore.
+ * - Tutti i modificatori agiscono positivamente e monotonamente sia sulla Potenza (CV) sia sulla Coppia (Nm).
+ */
+export function calculateSingleElectricMotorMetrics(
+  motorInput: ElectricMotorSpec | ElectricHybridEngineConfigInput | PowertrainBenchConfig,
+): SingleElectricMotorTelemetry {
+  const spec = extractElectricMotorSpec(motorInput);
+
+  const motorTypeSpec =
+    ELECTRIC_MOTOR_TYPES.find((m) => m.id === spec.electricMotorType) ??
+    ELECTRIC_MOTOR_TYPES[0];
+  const coolingSpec =
+    ELECTRIC_COOLING_SYSTEMS.find((c) => c.id === spec.coolingSystem) ??
+    ELECTRIC_COOLING_SYSTEMS[1];
+  const voltageSpec =
+    VOLTAGE_ARCHITECTURES.find((v) => v.voltage === spec.voltageArchitecture) ??
+    VOLTAGE_ARCHITECTURES[0];
+  const tierSpec = PRICE_TIER_EV_SPECS[spec.priceTier] ?? PRICE_TIER_EV_SPECS.Media;
+  const classSpec =
+    REFERENCE_CLASS_EV_SPECS[spec.referenceClass] ?? REFERENCE_CLASS_EV_SPECS.Normale;
+
+  // 1. Geometria attiva statore/rotore (Ds in mm, Lr in mm -> volume in cm³ / cc):
+  const Ds = Math.max(140, Math.min(360, spec.statorDiameterMm));
+  const Lr = Math.max(70, Math.min(300, spec.rotorLengthMm));
   const statorVolumeCc = Math.round(Math.PI * Math.pow(Ds / 20, 2) * (Lr / 10));
 
-  // 1. Ingombro singola unità motrice elettrica (mm):
-  // I motori a Flusso Assiale hanno spessore assiale ridottissimo ("pancake" ~90-115 mm)
-  const isAxialFlux = config.electricMotorType === 'AxialFlux';
+  const isAxialFlux = spec.electricMotorType === 'AxialFlux';
   const motorDiameterMm = Math.round(Ds + 38);
   const motorLengthMm = Math.round(isAxialFlux ? 85 + Lr * 0.22 : Lr + 80);
 
-  const motorDimensionsMm: DimensionsLWH = {
+  const dimensionsMm: DimensionsLWH = {
     lengthMm: motorLengthMm,
     widthMm: motorDiameterMm,
     heightMm: motorDiameterMm,
   };
 
-  // 2. Ingombro Inverter di potenza governato da PriceTier:
-  const tierSpec = PRICE_TIER_EV_SPECS[config.priceTier] ?? PRICE_TIER_EV_SPECS.Media;
   const isSiC = tierSpec.mappedInverterTech === 'SiliconCarbide_SiC';
   const isGaN = tierSpec.mappedInverterTech === 'GalliumNitride_GaN';
-
   const inverterDimensionsMm: DimensionsLWH = {
     lengthMm: Math.round(isGaN ? 185 : isSiC ? 235 : 295),
     widthMm: Math.round(isGaN ? 165 : isSiC ? 215 : 265),
     heightMm: Math.round(isGaN ? 70 : isSiC ? 90 : 120),
   };
 
-  // 3. Ingombro Pacco Batteria:
-  let batteryDimensionsMm: DimensionsLWH;
-  if (config.systemType === 'PureEV') {
-    const kwh = Math.max(20, config.batteryCapacityKwh);
+  // 2. Potenza (CV/kW) e Coppia (Nm) della singola unità motore (1.0x):
+  // Ogni singolo parametro (dimensioni, tecnologia, tensione, raffreddamento, PriceTier, ReferenceClass)
+  // scala positivamente sia CV sia Nm senza MAI invertire il segno!
+  const sizeFactor = Math.pow(statorVolumeCc / 6648, 0.62);
+  const coolingPowerMultiplier =
+    spec.coolingSystem === 'DirectDielectric'
+      ? 1.08
+      : spec.coolingSystem === 'LiquidGlycol'
+        ? 1.0
+        : 0.90; // Aria passiva riduce del 10% il picco erogabile per limiti termici sugli avvolgimenti
+
+  const rawUnitPowerHp =
+    145 *
+    sizeFactor *
+    motorTypeSpec.powerMultiplier *
+    voltageSpec.powerMultiplier *
+    tierSpec.powerMultiplier *
+    classSpec.powerMultiplier *
+    coolingPowerMultiplier;
+
+  const rawUnitTorqueNm =
+    165 *
+    sizeFactor *
+    motorTypeSpec.torqueMultiplier *
+    voltageSpec.powerMultiplier *
+    tierSpec.powerMultiplier *
+    classSpec.torqueMultiplier *
+    coolingPowerMultiplier;
+
+  const peakPowerHp = Math.max(25, Math.round(rawUnitPowerHp));
+  const peakPowerKw = Math.max(18, Math.round(peakPowerHp * 0.7355));
+  const peakTorqueNm = Math.max(35, Math.round(rawUnitTorqueNm));
+  const continuousPowerKw = Math.round(peakPowerKw * coolingSpec.continuousPowerRatio);
+
+  // Regime di Field Weakening (Corner Speed RPM) coerente con P_HP = (T_Nm * RPM_corner) / 7023.5:
+  const cornerSpeedRpm = Math.max(
+    4500,
+    Math.min(9500, Math.round((peakPowerHp * 7023.5) / Math.max(1, peakTorqueNm))),
+  );
+
+  const maxMotorRpm = Math.max(
+    14000,
+    Math.min(
+      22000,
+      Math.min(motorTypeSpec.maxSafeRpm, spec.maxMotorRpm || motorTypeSpec.maxSafeRpm),
+    ),
+  );
+
+  // 3. Curva dinamometrica nativa della singola unità motore (da 0 RPM a maxMotorRpm):
+  const curve: DynoCurvePoint[] = [];
+  const stepRpm = 250;
+  for (let rpm = 0; rpm <= maxMotorRpm; rpm += stepRpm) {
+    let torqueNow: number;
+    let powerNow: number;
+    if (rpm <= cornerSpeedRpm) {
+      torqueNow = peakTorqueNm;
+      powerNow = Math.round((torqueNow * rpm) / 7023.5);
+    } else {
+      powerNow = peakPowerHp;
+      torqueNow = Math.round((peakPowerHp * 7023.5) / rpm);
+    }
+    curve.push({ rpm, torqueNm: torqueNow, powerHp: powerNow });
+  }
+
+  // 4. Peso, Efficienza, Affidabilità e Durata della singola unità motore:
+  const motorCoreKg =
+    (22 + peakPowerKw * 0.21) * motorTypeSpec.weightMultiplier;
+  const inverterKg = spec.priceTier === 'Lusso' ? 5.5 : 9.0;
+  const dryWeightKg = Math.max(18, Math.round(motorCoreKg + inverterKg));
+  const wetWeightKg = Math.round(dryWeightKg + coolingSpec.weightKg * 0.45);
+
+  const efficiencyPercent = Number(
+    Math.min(
+      97.5,
+      Math.max(
+        82.0,
+        motorTypeSpec.baseEfficiencyPercent *
+          (tierSpec.inverterEfficiencyPercent / 93.5) +
+          voltageSpec.efficiencyBonusPercent * 0.4,
+      ),
+    ).toFixed(1),
+  );
+
+  const highRpmBearingPenalty =
+    maxMotorRpm > 17500 ? ((maxMotorRpm - 17500) / 1000) * 1.6 : 0;
+  let effectiveClassRelDelta = classSpec.reliabilityDeltaPercent;
+  if (
+    (spec.referenceClass === 'Corsa' || spec.referenceClass === 'Sport') &&
+    coolingSpec.protectsHighDischargeCorsa
+  ) {
+    effectiveClassRelDelta *= 0.45;
+  }
+
+  const reliabilityPercent = Number(
+    Math.min(
+      95.0,
+      Math.max(
+        60.0,
+        86.0 +
+          coolingSpec.reliabilityDeltaPercent +
+          tierSpec.reliabilityDeltaPercent +
+          effectiveClassRelDelta -
+          highRpmBearingPenalty,
+      ),
+    ).toFixed(1),
+  );
+
+  const baseMotorLifespanKm =
+    spec.referenceClass === 'Corsa'
+      ? 35_000
+      : spec.referenceClass === 'Sport'
+        ? 185_000
+        : 420_000;
+  const estimatedLifespanKm =
+    Math.round(
+      (baseMotorLifespanKm *
+        tierSpec.lifespanMultiplier *
+        (spec.coolingSystem === 'Air'
+          ? 0.78
+          : spec.coolingSystem === 'DirectDielectric'
+            ? 1.12
+            : 1.0)) /
+        1000,
+    ) * 1000;
+
+  // 5. Costo della singola unità motore universale (ZERO dipendenza da Anteriore/Posteriore o orientamento!):
+  const motorHardwareCost = Math.round(280 + peakPowerKw * motorTypeSpec.costPerKw);
+  const inverterAndCoolingCost = Math.round(
+    tierSpec.electronicsCostBase * voltageSpec.costMultiplier + coolingSpec.cost * 0.45,
+  );
+  const unitProductionCost = motorHardwareCost + inverterAndCoolingCost;
+
+  const motorComplexity =
+    spec.electricMotorType === 'AxialFlux'
+      ? 1.55
+      : spec.electricMotorType === 'IPM_SynRM'
+        ? 1.2
+        : 1.0;
+  const tierRdMult =
+    spec.priceTier === 'Lusso'
+      ? 1.6
+      : spec.priceTier === 'Premium'
+        ? 1.25
+        : spec.priceTier === 'Economica'
+          ? 0.75
+          : 1.0;
+
+  const developmentCost: DualCurrencyCost = {
+    capitalCost: Math.round(
+      motorTypeSpec.unlockCost.capitalCost *
+        motorComplexity *
+        voltageSpec.costMultiplier *
+        tierRdMult,
+    ),
+    rdCost: Math.round(
+      motorTypeSpec.unlockCost.rdCost *
+        motorComplexity *
+        voltageSpec.costMultiplier *
+        tierRdMult,
+    ),
+    minYear: Math.max(motorTypeSpec.minYear, coolingSpec.minYear),
+  };
+
+  return {
+    spec,
+    statorVolumeCc,
+    dimensionsMm,
+    inverterDimensionsMm,
+    inverterTech: tierSpec.mappedInverterTech,
+    inverterSummaryName: tierSpec.inverterName,
+    inverterEfficiencyPercent: tierSpec.inverterEfficiencyPercent,
+    peakPowerHp,
+    peakPowerKw,
+    continuousPowerKw,
+    peakTorqueNm,
+    cornerSpeedRpm,
+    maxMotorRpm,
+    efficiencyPercent,
+    dryWeightKg,
+    wetWeightKg,
+    reliabilityPercent,
+    estimatedLifespanKm,
+    motorHardwareCost,
+    inverterAndCoolingCost,
+    unitProductionCost,
+    developmentCost,
+    curve,
+  };
+}
+
+// ============================================================================
+// 3. COMPONENTE 2: PACCO BATTERIA INDIPENDENTE (`BatteryPackSpec`)
+// ============================================================================
+
+/**
+ * Calcola tutte le specifiche fisiche, di scarica massima (kW/CV), peso, ingombro, durata
+ * e costo di un Pacco Batteria Indipendente (`BatteryPackSpec`), salvabile separatamente.
+ */
+export function calculateBatteryPackMetrics(
+  batteryInput: BatteryPackSpec | ElectricHybridEngineConfigInput | PowertrainBenchConfig,
+  systemTypeHint?: HybridSystemType,
+): BatteryPackTelemetry {
+  const spec = extractBatteryPackSpec(batteryInput);
+  const inferredSystemType: HybridSystemType =
+    systemTypeHint ??
+    ('systemType' in batteryInput && batteryInput.systemType
+      ? batteryInput.systemType
+      : spec.batteryCapacityKwh <= 4
+        ? 'MHEV'
+        : spec.batteryCapacityKwh <= 8
+          ? 'FullHybrid'
+          : spec.batteryCapacityKwh <= 46
+            ? 'PHEV'
+            : 'PureEV');
+
+  const batteryChemSpec =
+    BATTERY_CHEMISTRIES.find((b) => b.id === spec.batteryChemistry) ??
+    BATTERY_CHEMISTRIES[0];
+  const coolingSpec =
+    ELECTRIC_COOLING_SYSTEMS.find((c) => c.id === spec.coolingSystem) ??
+    ELECTRIC_COOLING_SYSTEMS[1];
+  const voltageSpec =
+    VOLTAGE_ARCHITECTURES.find((v) => v.voltage === spec.voltageArchitecture) ??
+    VOLTAGE_ARCHITECTURES[0];
+  const tierSpec = PRICE_TIER_EV_SPECS[spec.priceTier] ?? PRICE_TIER_EV_SPECS.Media;
+  const classSpec =
+    REFERENCE_CLASS_EV_SPECS[spec.referenceClass] ?? REFERENCE_CLASS_EV_SPECS.Normale;
+
+  const usableBufferRatio =
+    spec.referenceClass === 'Corsa'
+      ? 0.98
+      : spec.referenceClass === 'Sport'
+        ? 0.94
+        : 0.90;
+  const usableCapacityKwh = Number(
+    (spec.batteryCapacityKwh * usableBufferRatio).toFixed(2),
+  );
+
+  // Calcolo C-Rate di scarica impulsiva massima e Potenza massima erogabile dalla batteria (kW / CV):
+  // I pacchi ibridi compatti (MHEV/FullHybrid) impiegano celle ad altissima potenza specifica (High-Power Pulse Cells),
+  // mentre i pacchi BEV/PHEV impiegano celle High-Energy/Performance.
+  const coolingDischargeFactor =
+    spec.coolingSystem === 'DirectDielectric'
+      ? 1.16
+      : spec.coolingSystem === 'LiquidGlycol'
+        ? 1.0
+        : 0.80;
+
+  const highPowerCellGeometryBoost =
+    inferredSystemType === 'MHEV'
+      ? 7.5
+      : inferredSystemType === 'FullHybrid'
+        ? 6.2
+        : inferredSystemType === 'PHEV'
+          ? 2.2
+          : 1.45;
+
+  const peakDischargeCRate = Number(
+    (
+      batteryChemSpec.maxContinuousCRate *
+      2.4 *
+      highPowerCellGeometryBoost *
+      voltageSpec.powerMultiplier *
+      tierSpec.powerMultiplier *
+      classSpec.powerMultiplier *
+      coolingDischargeFactor
+    ).toFixed(2),
+  );
+
+  const maxDischargePowerKw = Math.max(
+    18,
+    Math.round(spec.batteryCapacityKwh * peakDischargeCRate),
+  );
+  const maxDischargePowerHp = Math.round(maxDischargePowerKw / 0.7355);
+  const maxContinuousDischargePowerKw = Math.max(
+    12,
+    Math.round(maxDischargePowerKw * coolingSpec.continuousPowerRatio),
+  );
+
+  // Peso del pacco batteria (kg):
+  const weightKg = Math.max(
+    8,
+    Math.round(
+      ((spec.batteryCapacityKwh * 1000) / batteryChemSpec.cellDensityWhPerKg) *
+        batteryChemSpec.packagingMultiplier *
+        classSpec.batteryPackWeightMultiplier,
+    ),
+  );
+
+  // Ingombro 3D del pacco batteria (mm):
+  let dimensionsMm: DimensionsLWH;
+  if (inferredSystemType === 'PureEV') {
+    const kwh = Math.max(20, spec.batteryCapacityKwh);
     const kwhScale = Math.pow(kwh / 75.0, 0.42);
-    batteryDimensionsMm = {
+    dimensionsMm = {
       lengthMm: Math.round(1420 * kwhScale),
       widthMm: 1160,
       heightMm: Math.round(110 + (kwh > 85 ? 22 : 0)),
     };
-  } else if (config.systemType === 'MHEV') {
-    batteryDimensionsMm = { lengthMm: 290, widthMm: 200, heightMm: 135 };
-  } else if (config.systemType === 'FullHybrid') {
-    batteryDimensionsMm = { lengthMm: 460, widthMm: 330, heightMm: 180 };
+  } else if (inferredSystemType === 'MHEV') {
+    dimensionsMm = { lengthMm: 290, widthMm: 200, heightMm: 135 };
+  } else if (inferredSystemType === 'FullHybrid') {
+    dimensionsMm = { lengthMm: 460, widthMm: 330, heightMm: 180 };
   } else {
-    const kwh = Math.max(10, config.batteryCapacityKwh);
+    const kwh = Math.max(10, spec.batteryCapacityKwh);
     const kwhScale = Math.pow(kwh / 20.0, 0.46);
-    batteryDimensionsMm = {
+    dimensionsMm = {
       lengthMm: Math.round(690 * kwhScale),
       widthMm: Math.round(460 * kwhScale),
       heightMm: 225,
     };
   }
 
-  // 4. Ingombro nel vano motore per verifica collisione col Pianale (mm):
+  // Costi realistici del pacco batteria ($/kWh: LFP 75, NMC811 110, NCA 135, SolidState 190):
+  const costPerKwh = batteryChemSpec.costPerKwh;
+  const cellsCost = Math.round(spec.batteryCapacityKwh * costPerKwh);
+  const bmsAndThermalCost = Math.round(coolingSpec.cost * 0.55);
+  const unitProductionCost = cellsCost + bmsAndThermalCost;
+
+  // Affidabilità e durata chilometrica del pacco batteria:
+  let effectiveClassRelDelta = classSpec.reliabilityDeltaPercent;
+  if (
+    (spec.referenceClass === 'Corsa' || spec.referenceClass === 'Sport') &&
+    coolingSpec.protectsHighDischargeCorsa
+  ) {
+    effectiveClassRelDelta *= 0.45;
+  }
+
+  const reliabilityPercent = Number(
+    Math.min(
+      95.0,
+      Math.max(
+        58.0,
+        84.0 +
+          batteryChemSpec.reliabilityDeltaPercent +
+          coolingSpec.reliabilityDeltaPercent +
+          tierSpec.reliabilityDeltaPercent +
+          effectiveClassRelDelta,
+      ),
+    ).toFixed(1),
+  );
+
+  const coolingLifespanFactor =
+    spec.coolingSystem === 'Air'
+      ? 0.76
+      : spec.coolingSystem === 'DirectDielectric'
+        ? 1.12
+        : 1.0;
+
+  let estimatedLifespanKm: number;
+  if (spec.referenceClass === 'Corsa') {
+    const corsaBaseKm = spec.coolingSystem === 'DirectDielectric' ? 34_000 : 21_000;
+    estimatedLifespanKm = Math.max(
+      15_000,
+      Math.min(
+        45_000,
+        Math.round(
+          corsaBaseKm *
+            tierSpec.lifespanMultiplier *
+            (spec.batteryChemistry === 'LFP' ? 1.15 : 1.0),
+        ),
+      ),
+    );
+  } else if (spec.referenceClass === 'Sport') {
+    const sportBaseKm =
+      spec.batteryChemistry === 'LFP'
+        ? 172_000
+        : spec.batteryChemistry === 'NCA'
+          ? 138_000
+          : 156_000;
+    estimatedLifespanKm = Math.max(
+      120_000,
+      Math.min(
+        200_000,
+        Math.round(sportBaseKm * tierSpec.lifespanMultiplier * coolingLifespanFactor),
+      ),
+    );
+  } else {
+    const classLifespanMult =
+      spec.referenceClass === 'Comfort'
+        ? 1.08
+        : spec.referenceClass === 'Fuoristrada'
+          ? 0.94
+          : 1.0;
+    const rawNormalKm = Math.round(
+      batteryChemSpec.baseLifespanKm *
+        tierSpec.lifespanMultiplier *
+        coolingLifespanFactor *
+        classLifespanMult,
+    );
+    estimatedLifespanKm =
+      spec.batteryChemistry === 'LFP'
+        ? Math.max(350_000, Math.min(550_000, rawNormalKm))
+        : Math.max(220_000, Math.min(360_000, rawNormalKm));
+  }
+  estimatedLifespanKm = Math.round(estimatedLifespanKm / 1000) * 1000;
+
+  const chemComplexity =
+    spec.batteryChemistry === 'SolidState'
+      ? 1.65
+      : spec.batteryChemistry === 'NCA'
+        ? 1.2
+        : 1.0;
+  const developmentCost: DualCurrencyCost = {
+    capitalCost: Math.round(8_000_000 * chemComplexity * voltageSpec.costMultiplier),
+    rdCost: Math.round(95 * chemComplexity * voltageSpec.costMultiplier),
+    minYear: Math.max(batteryChemSpec.minYear, coolingSpec.minYear),
+  };
+
+  return {
+    spec,
+    batteryCapacityKwh: spec.batteryCapacityKwh,
+    usableCapacityKwh,
+    maxDischargePowerKw,
+    maxDischargePowerHp,
+    maxContinuousDischargePowerKw,
+    peakDischargeCRate,
+    maxContinuousCRate: batteryChemSpec.maxContinuousCRate,
+    weightKg,
+    dimensionsMm,
+    costPerKwh,
+    cellsCost,
+    bmsAndThermalCost,
+    unitProductionCost,
+    reliabilityPercent,
+    estimatedLifespanKm,
+    cycleLife: batteryChemSpec.cycleLife,
+    developmentCost,
+  };
+}
+
+// ============================================================================
+// 4. ALGORITMO DI COMBINAZIONE CURVE IBRIDE E MULTI-MOTORE AL BANCO PROVA
+// ============================================================================
+
+/**
+ * Calcola le metriche complessive di erogazione del comparto elettrico sul simulatore al banco:
+ * - Scala lineare esatta per motori uguali:
+ *   Single = 1.0x, Dual = 2.0x, Tri = 3.0x, Quad = 4.0x
+ *   (oppure 1 motore con albero di trasmissione meccanico AWD = 0.92x, cioè -8% di perdita).
+ * - Risolve il bug per cui in MHEV e FullHybrid i modificatori lavoravano al contrario o
+ *   modificavano solo la coppia senza variare i CV, e per cui il Tri/Quad-Motor restava bloccato a 1.5x.
+ */
+export function calculateElectricOutputMetrics(
+  configInput: ElectricHybridEngineConfigInput | PowertrainBenchConfig,
+): {
+  unitMotor: SingleElectricMotorTelemetry;
+  batteryPack: BatteryPackTelemetry;
+  linearMotorScale: number;
+  motorCount: BenchElectricMotorCount;
+  hasMechanicalAwdShaft: boolean;
+  peakElectricPowerHp: number;
+  peakElectricPowerKw: number;
+  continuousPowerKw: number;
+  peakElectricTorqueNm: number;
+  maxBatterySupportedElectricHp: number;
+  cornerSpeedRpm: number;
+  maxMotorRpm: number;
+  cRatePeak: number;
+} {
+  const bench = toPowertrainBenchConfig(configInput);
+  const unitMotor = calculateSingleElectricMotorMetrics(bench.motor);
+  const batteryPack = calculateBatteryPackMetrics(bench.battery, bench.systemType);
+  const { motorCount, hasMechanicalAwdShaft, linearOutputMultiplier } =
+    getBenchLinearMotorScale(bench);
+
+  // Rapporto di accoppiamento di sistema per MHEV (48V) e FullHybrid (HEV) vs trazione primaria (PHEV/EREV/PureEV):
+  // Nota fondamentale: il rapporto è un coefficiente puro per la topologia, così ogni modificatore
+  // del motore e la scala 1.0x / 2.0x / 3.0x / 4.0x scalano SEMPRE linearmente sia i CV sia i Nm!
+  const systemArchitectureFactor =
+    bench.systemType === 'MHEV'
+      ? 0.25
+      : bench.systemType === 'FullHybrid'
+        ? 0.55
+        : 1.0;
+
+  // Fattore di alimentazione dalla batteria selezionata (kWh e chimica):
+  // Permette alla batteria selezionata di limitare (se sottodimensionata/bassa scarica) o sostenere
+  // la potenza elettrica massima erogata dal comparto elettrico a ogni regime!
+  const refKwh =
+    bench.systemType === 'MHEV'
+      ? 1.5
+      : bench.systemType === 'FullHybrid'
+        ? 2.8
+        : bench.systemType === 'PHEV'
+          ? 22
+          : bench.systemType === 'RangeExtender'
+            ? 32
+            : 75;
+
+  const batteryChemSpec =
+    BATTERY_CHEMISTRIES.find((b) => b.id === bench.battery.batteryChemistry) ??
+    BATTERY_CHEMISTRIES[0];
+
+  const capacityFactor = Math.pow(
+    Math.max(0.35, bench.battery.batteryCapacityKwh / refKwh),
+    0.24,
+  );
+  const chemistryDischargeFactor = Math.pow(
+    batteryChemSpec.maxContinuousCRate / 3.8,
+    0.20,
+  );
+  const batteryDischargeDeliveryRatio = Math.min(
+    1.25,
+    Math.max(0.72, capacityFactor * chemistryDischargeFactor),
+  );
+
+  // Coppia e Potenza meccanica del comparto elettrico (scala lineare esatta: 1.0x, 2.0x, 3.0x, 4.0x, o 0.92x):
+  const rawCompartmentPowerHp =
+    unitMotor.peakPowerHp * linearOutputMultiplier * systemArchitectureFactor;
+  const rawCompartmentTorqueNm =
+    unitMotor.peakTorqueNm * linearOutputMultiplier * systemArchitectureFactor;
+
+  // Potenza elettrica massima limitata/sostenuta dalla scarica della batteria selezionata:
+  const maxBatterySupportedElectricHp = Math.max(
+    12,
+    Math.round(
+      Math.min(
+        batteryPack.maxDischargePowerHp * motorCount,
+        rawCompartmentPowerHp * batteryDischargeDeliveryRatio,
+      ),
+    ),
+  );
+
+  const peakElectricPowerHp = Math.max(12, Math.round(maxBatterySupportedElectricHp));
+  const peakElectricPowerKw = Math.max(9, Math.round(peakElectricPowerHp * 0.7355));
+  const peakElectricTorqueNm = Math.max(
+    20,
+    Math.round(rawCompartmentTorqueNm * batteryDischargeDeliveryRatio),
+  );
+
+  const coolingSpec =
+    ELECTRIC_COOLING_SYSTEMS.find((c) => c.id === bench.motor.coolingSystem) ??
+    ELECTRIC_COOLING_SYSTEMS[1];
+  const continuousPowerKw = Math.round(
+    peakElectricPowerKw * coolingSpec.continuousPowerRatio,
+  );
+
+  // Regime di Field Weakening (invariante rispetto a 1.0x / 2.0x / 3.0x / 4.0x!):
+  const cornerSpeedRpm = unitMotor.cornerSpeedRpm;
+  const maxMotorRpm = unitMotor.maxMotorRpm;
+
+  const cRatePeak = Number(
+    (peakElectricPowerKw / Math.max(0.8, bench.battery.batteryCapacityKwh)).toFixed(2),
+  );
+
+  return {
+    unitMotor,
+    batteryPack,
+    linearMotorScale: linearOutputMultiplier,
+    motorCount,
+    hasMechanicalAwdShaft,
+    peakElectricPowerHp,
+    peakElectricPowerKw,
+    continuousPowerKw,
+    peakElectricTorqueNm,
+    maxBatterySupportedElectricHp,
+    cornerSpeedRpm,
+    maxMotorRpm,
+    cRatePeak,
+  };
+}
+
+/**
+ * Genera la curva dinamometrica combinata per `MHEV`, `FullHybrid` e `PHEV`:
+ * 1. Calcola prima la curva reale di coppia e potenza del comparto elettrico a ogni step di RPM
+ *    (scalata linearmente 1.0x / 2.0x / 3.0x / 4.0x o 0.92x e limitata dalla potenza di scarica massima
+ *    della batteria selezionata).
+ * 2. Somma positivamente la coppia elettrica alla curva del motore termico/Wankel scelto a ogni step di RPM.
+ * 3. Ricalcola i CV totali di sistema a ogni regime direttamente dalla coppia combinata:
+ *    `CV = (Nm_totali * RPM) / 7023.5`.
+ */
+export function generateCombinedHybridDynoCurve(params: {
+  coupledIce: CoupledIceEngineOption;
+  peakElectricTorqueNm: number;
+  peakElectricPowerHp: number;
+  maxBatterySupportedElectricHp: number;
+  cornerSpeedRpm: number;
+  maxMotorRpm: number;
+}): {
+  curve: DynoCurvePoint[];
+  iceOnlyCurve: DynoCurvePoint[];
+  electricOnlyCurve: DynoCurvePoint[];
+  peakPowerHp: number;
+  peakPowerRpm: number;
+  peakTorqueNm: number;
+  peakTorqueRpm: number;
+  redlineRpm: number;
+} {
+  const {
+    coupledIce,
+    peakElectricTorqueNm,
+    peakElectricPowerHp,
+    maxBatterySupportedElectricHp,
+  } = params;
+
+  const redlineRpm = coupledIce.redlineRpm;
+  const minIceRpm = coupledIce.curve[0]?.rpm ?? 1000;
+  const stepRpm = 100;
+
+  // Potenza elettrica massima erogabile (limitata dalla potenza di scarica massima della batteria selezionata):
+  const effectiveMaxEvPowerHp = Math.min(
+    peakElectricPowerHp,
+    maxBatterySupportedElectricHp,
+  );
+
+  // Regime sull'albero accoppiato in cui il comparto elettrico passa dalla regione a coppia costante
+  // (peakElectricTorqueNm) alla regione a potenza costante (effectiveMaxEvPowerHp),
+  // garantendo che il motore elettrico esprima sia l'intera coppia ai bassi/medi regimi
+  // sia l'intera potenza (CV) agli alti regimi prima del limitatore termico/Wankel!
+  const naturalCornerOnIceAxis = Math.round(
+    (effectiveMaxEvPowerHp * 7023.5) / Math.max(1, peakElectricTorqueNm),
+  );
+  const hybridTransitionRpm = Math.max(
+    minIceRpm + 400,
+    Math.min(Math.round(redlineRpm * 0.65), naturalCornerOnIceAxis),
+  );
+
+  const curve: DynoCurvePoint[] = [];
+  const iceOnlyCurve: DynoCurvePoint[] = [];
+  const electricOnlyCurve: DynoCurvePoint[] = [];
+
+  let peakPowerHp = 0;
+  let peakPowerRpm = minIceRpm;
+  let peakTorqueNm = 0;
+  let peakTorqueRpm = minIceRpm;
+
+  for (let rpm = minIceRpm; rpm <= redlineRpm; rpm += stepRpm) {
+    // Step 1: Campiona la curva del motore Termico o Wankel scelto a questo RPM
+    const iceSample = sampleCurveAtRpm(coupledIce.curve, rpm);
+
+    // Step 2: Calcola la curva reale di coppia e potenza del comparto elettrico a questo step di RPM,
+    // limitata dalla potenza di scarica massima della batteria selezionata:
+    let evTorqueContributionNm: number;
+    let evPowerContributionHp: number;
+
+    if (rpm <= hybridTransitionRpm) {
+      // Regione a coppia costante (Torque Fill pieno ai bassi e medi regimi):
+      const rawTorqueNm = peakElectricTorqueNm;
+      const rawPowerHp = (rawTorqueNm * rpm) / 7023.5;
+      // Verifica il limite di potenza di scarica massima della batteria a questo RPM:
+      evPowerContributionHp = Math.round(Math.min(rawPowerHp, effectiveMaxEvPowerHp));
+      evTorqueContributionNm =
+        rawPowerHp > effectiveMaxEvPowerHp
+          ? Math.round((evPowerContributionHp * 7023.5) / rpm)
+          : Math.round(rawTorqueNm);
+    } else {
+      // Regione di Field Weakening / Potenza Elettrica Costante limitata dalla batteria:
+      // La potenza elettrica raggiunge il plateau effectiveMaxEvPowerHp e la coppia scende come 1/RPM
+      const progressAboveTransition =
+        (rpm - hybridTransitionRpm) / Math.max(1, redlineRpm - hybridTransitionRpm);
+      const targetEvPowerHp = Math.min(
+        effectiveMaxEvPowerHp,
+        Math.round(
+          ((peakElectricTorqueNm * hybridTransitionRpm) / 7023.5) *
+            (1 - progressAboveTransition) +
+            effectiveMaxEvPowerHp * progressAboveTransition,
+        ),
+      );
+      evPowerContributionHp = Math.max(
+        Math.min(
+          effectiveMaxEvPowerHp,
+          Math.round((peakElectricTorqueNm * hybridTransitionRpm) / 7023.5),
+        ),
+        targetEvPowerHp,
+      );
+      evTorqueContributionNm = Math.round((evPowerContributionHp * 7023.5) / rpm);
+    }
+
+    // Step 3: Somma positivamente la coppia elettrica alla coppia del motore termico/Wankel
+    // e ricalcola i CV totali di sistema a ogni regime dalla coppia combinata: CV = (Nm_totali * RPM) / 7023.5
+    const combinedTorqueNow = iceSample.torqueNm + evTorqueContributionNm;
+    const combinedPowerNow = Math.round((combinedTorqueNow * rpm) / 7023.5);
+
+    iceOnlyCurve.push({
+      rpm,
+      torqueNm: iceSample.torqueNm,
+      powerHp: iceSample.powerHp,
+    });
+
+    electricOnlyCurve.push({
+      rpm,
+      torqueNm: evTorqueContributionNm,
+      powerHp: evPowerContributionHp,
+    });
+
+    curve.push({
+      rpm,
+      torqueNm: combinedTorqueNow,
+      powerHp: combinedPowerNow,
+    });
+
+    if (combinedTorqueNow > peakTorqueNm) {
+      peakTorqueNm = combinedTorqueNow;
+      peakTorqueRpm = rpm;
+    }
+    if (combinedPowerNow > peakPowerHp) {
+      peakPowerHp = combinedPowerNow;
+      peakPowerRpm = rpm;
+    }
+  }
+
+  return {
+    curve,
+    iceOnlyCurve,
+    electricOnlyCurve,
+    peakPowerHp,
+    peakPowerRpm,
+    peakTorqueNm,
+    peakTorqueRpm,
+    redlineRpm,
+  };
+}
+
+// ============================================================================
+// 5. GEOMETRIA COMPLESSIVA, COSTI E SIMULAZIONE BANCO PROVA (1C)
+// ============================================================================
+
+/**
+ * Calcola l'ingombro tridimensionale (LWH mm) della singola unità motore elettrico, dell'inverter,
+ * del pacco batteria indipendente e del gruppo propulsore complessivo installato nel vano motore.
+ */
+export function calculateElectricHybridGeometryAndDimensions(
+  configInput: ElectricHybridEngineConfigInput | PowertrainBenchConfig,
+  coupledIce?: CoupledIceEngineOption,
+): ElectricHybridGeometryMetrics {
+  const bench = toPowertrainBenchConfig(configInput);
+  const unitMotor = calculateSingleElectricMotorMetrics(bench.motor);
+  const batteryPack = calculateBatteryPackMetrics(bench.battery, bench.systemType);
+
+  const motorDimensionsMm = unitMotor.dimensionsMm;
+  const inverterDimensionsMm = unitMotor.inverterDimensionsMm;
+  const batteryDimensionsMm = batteryPack.dimensionsMm;
+  const isAxialFlux = bench.motor.electricMotorType === 'AxialFlux';
+
   let bayLengthMm: number;
   let bayWidthMm: number;
   let bayHeightMm: number;
 
-  if (config.systemType === 'PureEV') {
-    // Nel BEV il vano ospita l'e-Axle (motore + riduttore epicicloidale + inverter sopra)
+  if (bench.systemType === 'PureEV') {
     bayLengthMm = Math.round(motorDimensionsMm.lengthMm + 130);
     bayWidthMm = Math.round(motorDimensionsMm.widthMm + 115);
-    bayHeightMm = Math.round(motorDimensionsMm.heightMm + inverterDimensionsMm.heightMm + 35);
+    bayHeightMm = Math.round(
+      motorDimensionsMm.heightMm + inverterDimensionsMm.heightMm + 35,
+    );
   } else {
-    // Negli Ibridi il vano ospita il motore Termico/Wankel scelto + il modulo elettrico accoppiato
     const iceDims = coupledIce?.dimensionsMm ?? {
       lengthMm: 465,
       widthMm: 580,
       heightMm: 620,
     };
     const hybridModuleAddLengthMm =
-      config.systemType === 'MHEV'
-        ? 45
-        : isAxialFlux
-          ? 75
-          : 115;
+      bench.systemType === 'MHEV' ? 45 : isAxialFlux ? 75 : 115;
 
     bayLengthMm = Math.round(iceDims.lengthMm + hybridModuleAddLengthMm);
     bayWidthMm = Math.round(Math.max(iceDims.widthMm, motorDimensionsMm.widthMm + 60));
@@ -170,223 +1068,61 @@ export function calculateElectricHybridGeometryAndDimensions(
       widthMm: bayWidthMm,
       heightMm: bayHeightMm,
     },
-    statorVolumeCc,
+    statorVolumeCc: unitMotor.statorVolumeCc,
   };
 }
 
 /**
- * Calcola la Potenza Elettrica di Picco (CV e kW), la Coppia Elettrica (Nm) e il regime di Field Weakening
- * in base a geometria statore/rotore, tipologia motore, configurazione 1/2/3/4 motori,
- * architettura di tensione (400V / 800V / 1000V+), PriceTier e ReferenceClass.
- */
-export function calculateElectricOutputMetrics(config: ElectricHybridEngineConfigInput): {
-  peakElectricPowerHp: number;
-  peakElectricPowerKw: number;
-  continuousPowerKw: number;
-  peakElectricTorqueNm: number;
-  cornerSpeedRpm: number;
-  maxMotorRpm: number;
-  cRatePeak: number;
-} {
-  const motorSpec =
-    ELECTRIC_MOTOR_TYPES.find((m) => m.id === config.electricMotorType) ??
-    ELECTRIC_MOTOR_TYPES[0];
-  const layoutSpec =
-    MOTOR_LAYOUT_CONFIGS.find((l) => l.id === config.motorLayout) ??
-    MOTOR_LAYOUT_CONFIGS[0];
-  const coolingSpec =
-    ELECTRIC_COOLING_SYSTEMS.find((c) => c.id === config.coolingSystem) ??
-    ELECTRIC_COOLING_SYSTEMS[1];
-  const voltageSpec =
-    VOLTAGE_ARCHITECTURES.find((v) => v.voltage === config.voltageArchitecture) ??
-    VOLTAGE_ARCHITECTURES[0];
-  const tierSpec = PRICE_TIER_EV_SPECS[config.priceTier] ?? PRICE_TIER_EV_SPECS.Media;
-  const classSpec =
-    REFERENCE_CLASS_EV_SPECS[config.referenceClass] ?? REFERENCE_CLASS_EV_SPECS.Normale;
-
-  const geom = calculateElectricHybridGeometryAndDimensions(config);
-
-  // Fattore geometrico normalizzato sul volume statore/rotore (rif. 230x160mm = 6648 cc):
-  // Da 0.34 (150x80mm citycar) fino a 2.38 (340x280mm hypercar)
-  const sizeFactor = Math.pow(geom.statorVolumeCc / 6648, 0.65);
-
-  // Potenza base di un singolo motore di riferimento (185 CV a sizeFactor = 1.0):
-  const rawSingleMotorHp =
-    185 *
-    sizeFactor *
-    motorSpec.powerMultiplier *
-    voltageSpec.powerMultiplier *
-    tierSpec.powerMultiplier *
-    classSpec.powerMultiplier;
-
-  // Moltiplicatore layout (Single RWD 1.0x, Single FWD 0.95x, Dual 1.88x, Tri 2.75x, Quad 3.68x):
-  let rawTotalElectricHp = rawSingleMotorHp * layoutSpec.totalOutputMultiplier;
-
-  // Adattamento per architetture ibride leggere vs trazione primaria:
-  if (config.systemType === 'MHEV') {
-    // Starter-generatore 48V: tipicamente tra 16 e 65 CV di assistenza
-    rawTotalElectricHp = Math.min(68, Math.max(16, rawTotalElectricHp * 0.18));
-  } else if (config.systemType === 'FullHybrid') {
-    // Full Hybrid HEV: limitato anche dalla scarica della batteria compatta (1.5 - 6.5 kWh)
-    const maxBatteryHp = config.batteryCapacityKwh * 38 * classSpec.powerMultiplier;
-    rawTotalElectricHp = Math.min(maxBatteryHp, Math.max(45, rawTotalElectricHp * 0.55));
-  } else if (config.systemType === 'PHEV') {
-    // Plug-in Hybrid: consente potenze elettriche elevate compatibili con la batteria (10 - 45 kWh)
-    const maxPhevBatteryHp = config.batteryCapacityKwh * 42 * classSpec.powerMultiplier;
-    rawTotalElectricHp = Math.min(maxPhevBatteryHp, Math.max(95, rawTotalElectricHp));
-  } else {
-    // PureEV e RangeExtender: rispettano i range fisici realistici di ogni layout!
-    if (layoutSpec.motorCount === 1) {
-      rawTotalElectricHp = Math.max(60, Math.min(540, rawTotalElectricHp));
-    } else if (layoutSpec.motorCount === 2) {
-      rawTotalElectricHp = Math.max(240, Math.min(960, rawTotalElectricHp));
-    } else if (layoutSpec.motorCount === 3) {
-      rawTotalElectricHp = Math.max(580, Math.min(1380, rawTotalElectricHp));
-    } else if (layoutSpec.motorCount === 4) {
-      rawTotalElectricHp = Math.max(980, Math.min(2450, rawTotalElectricHp));
-    }
-  }
-
-  const peakElectricPowerHp = Math.round(rawTotalElectricHp);
-  const peakElectricPowerKw = Math.round(peakElectricPowerHp * 0.7355);
-
-  // Regime di Field Weakening (Corner Speed RPM, tra 5.500 e 9.500 RPM):
-  // Motori più grandi o tarature Fuoristrada/Coppia anticipano leggermente il corner RPM dando più Nm in basso
-  const sizeCornerShift = Math.round((1.0 - Math.min(1.5, sizeFactor)) * 450);
-  const classCornerShift =
-    config.referenceClass === 'Fuoristrada'
-      ? -750
-      : config.referenceClass === 'Corsa'
-        ? +350
-        : 0;
-  const torqueVsPowerShift = Math.round(
-    (motorSpec.powerMultiplier / motorSpec.torqueMultiplier - 1.0) * 600,
-  );
-
-  const cornerSpeedRpm = Math.max(
-    5500,
-    Math.min(
-      9500,
-      Math.round(
-        motorSpec.baseCornerRpm +
-          voltageSpec.cornerSpeedBonusRpm * 0.65 +
-          sizeCornerShift +
-          classCornerShift +
-          torqueVsPowerShift,
-      ),
-    ),
-  );
-
-  // Coppia massima all'albero motore elettrico (Nm) fisicamente coerente con P = (T * RPM_corner) / 7023.5:
-  // In questo modo a cornerSpeedRpm la curva di coppia piatta si raccorda con continuità C1 perfetta al plateau di potenza!
-  const torqueBoostFactor =
-    (motorSpec.torqueMultiplier / motorSpec.powerMultiplier) *
-    (classSpec.torqueMultiplier / classSpec.powerMultiplier);
-
-  // Regoliamo cornerSpeed effettivo per riflettere l'eventuale surplus di coppia (es. Fuoristrada o PSM/AxialFlux/QuadMotor)
-  const multiMotorTorqueFactor =
-    layoutSpec.motorCount === 4
-      ? 1.32
-      : layoutSpec.motorCount === 3
-        ? 1.18
-        : 1.0;
-
-  const effectiveCornerSpeedRpm = Math.max(
-    5500,
-    Math.min(
-      9500,
-      Math.round(cornerSpeedRpm / Math.max(0.82, torqueBoostFactor * multiMotorTorqueFactor)),
-    ),
-  );
-
-  const peakElectricTorqueNm = Math.max(
-    config.systemType === 'MHEV' ? 55 : 110,
-    Math.round((peakElectricPowerHp * 7023.5) / effectiveCornerSpeedRpm),
-  );
-
-  // Potenza continua sostenibile termicamente (kW):
-  const continuousPowerKw = Math.round(
-    peakElectricPowerKw * coolingSpec.continuousPowerRatio,
-  );
-
-  // Regime massimo di rotazione (14.000 - 22.000 RPM):
-  const maxMotorRpm = Math.max(
-    14000,
-    Math.min(22000, Math.min(motorSpec.maxSafeRpm, config.maxMotorRpm || motorSpec.maxSafeRpm)),
-  );
-
-  // Stress di scarica batteria di picco (C-Rate = kW_picco / kWh_batteria):
-  const cRatePeak = Number(
-    (peakElectricPowerKw / Math.max(0.8, config.batteryCapacityKwh)).toFixed(2),
-  );
-
-  return {
-    peakElectricPowerHp,
-    peakElectricPowerKw,
-    continuousPowerKw,
-    peakElectricTorqueNm,
-    cornerSpeedRpm: effectiveCornerSpeedRpm,
-    maxMotorRpm,
-    cRatePeak,
-  };
-}
-
-/**
- * Punto 4: Calcola i costi realistici del pacco batteria ($/kWh: LFP 75, NMC 110, NCA 135, SolidState 190),
- * i costi unitari di produzione e i costi di sviluppo R&D.
+ * Calcola i costi realistici separando:
+ * - il costo della singola unità motore (`unitMotor.unitProductionCost`, moltiplicato per il numero di motori)
+ * - il costo del pacco batteria indipendente (`batteryCost = kWh * $/kWh`)
+ * - il costo del motore termico/Wankel accoppiato (se ibrido)
  */
 export function calculateElectricHybridCosts(
-  config: ElectricHybridEngineConfigInput,
+  configInput: ElectricHybridEngineConfigInput | PowertrainBenchConfig,
   coupledIce?: CoupledIceEngineOption,
 ): {
   unitProductionCost: number;
+  singleMotorUnitCost: number;
   batteryCost: number;
   motorSystemCost: number;
   inverterAndCoolingCost: number;
   coupledIceCost: number;
   developmentCost: DualCurrencyCost;
 } {
-  const motorSpec =
-    ELECTRIC_MOTOR_TYPES.find((m) => m.id === config.electricMotorType) ??
-    ELECTRIC_MOTOR_TYPES[0];
-  const layoutSpec =
-    MOTOR_LAYOUT_CONFIGS.find((l) => l.id === config.motorLayout) ??
-    MOTOR_LAYOUT_CONFIGS[0];
-  const batterySpec =
-    BATTERY_CHEMISTRIES.find((b) => b.id === config.batteryChemistry) ??
-    BATTERY_CHEMISTRIES[0];
-  const coolingSpec =
-    ELECTRIC_COOLING_SYSTEMS.find((c) => c.id === config.coolingSystem) ??
-    ELECTRIC_COOLING_SYSTEMS[1];
-  const voltageSpec =
-    VOLTAGE_ARCHITECTURES.find((v) => v.voltage === config.voltageArchitecture) ??
-    VOLTAGE_ARCHITECTURES[0];
-  const tierSpec = PRICE_TIER_EV_SPECS[config.priceTier] ?? PRICE_TIER_EV_SPECS.Media;
+  const bench = toPowertrainBenchConfig(configInput);
+  const unitMotor = calculateSingleElectricMotorMetrics(bench.motor);
+  const batteryPack = calculateBatteryPackMetrics(bench.battery, bench.systemType);
+  const { motorCount, hasMechanicalAwdShaft } = getBenchLinearMotorScale(bench);
+
   const systemSpec =
-    HYBRID_SYSTEM_TYPES.find((s) => s.id === config.systemType) ??
+    HYBRID_SYSTEM_TYPES.find((s) => s.id === bench.systemType) ??
     HYBRID_SYSTEM_TYPES[0];
+  const coolingSpec =
+    ELECTRIC_COOLING_SYSTEMS.find((c) => c.id === bench.motor.coolingSystem) ??
+    ELECTRIC_COOLING_SYSTEMS[1];
 
-  const { peakElectricPowerKw } = calculateElectricOutputMetrics(config);
+  // 1. Costo Pacco Batteria ($/kWh puro: LFP 75, NMC811 110, NCA 135, SolidState 190):
+  const batteryCost = batteryPack.cellsCost;
 
-  // 1. Costo realistico Pacco Batteria ($/kWh puro: es. 40 kWh LFP * 75 $/kWh = $3.000!):
-  const batteryCost = Math.round(config.batteryCapacityKwh * batterySpec.costPerKwh);
+  // 2. Costo Motori Elettrici (esattamente proporzionale al numero di motori: 1x, 2x, 3x, 4x;
+  // zero dipendenza da posizionamento Anteriore/Posteriore o orientamento Trasversale/Longitudinale):
+  const mechanicalShaftAddonCost = hasMechanicalAwdShaft ? 650 : 0;
+  const disconnectAddonCost =
+    bench.hasFrontDisconnect && motorCount >= 2 ? 320 : 0;
 
-  // 2. Costo Motori Elettrici:
-  const singleMotorKw = peakElectricPowerKw / Math.max(1, layoutSpec.motorCount);
-  const motorBaseCost = Math.round(
-    (280 + singleMotorKw * motorSpec.costPerKw) *
-      layoutSpec.motorCount *
-      (config.hasFrontDisconnect && layoutSpec.id === 'DualMotor_eAWD' ? 1.08 : 1.0),
+  const motorSystemCost = Math.round(
+    unitMotor.motorHardwareCost * motorCount +
+      mechanicalShaftAddonCost +
+      disconnectAddonCost,
   );
-  const motorSystemCost = Math.round(motorBaseCost);
 
-  // 3. Costo Elettronica di Potenza (Inverter governato da PriceTier) + Raffreddamento + Alta Tensione:
-  const inverterCost = Math.round(
-    tierSpec.electronicsCostBase *
-      (1 + (layoutSpec.motorCount - 1) * 0.55) *
-      voltageSpec.costMultiplier,
+  // 3. Costo Inverter + Gestione Termica:
+  const inverterAndCoolingCost = Math.round(
+    (unitMotor.inverterAndCoolingCost - coolingSpec.cost * 0.45) *
+      (1 + (motorCount - 1) * 0.65) +
+      coolingSpec.cost,
   );
-  const inverterAndCoolingCost = Math.round(inverterCost + coolingSpec.cost);
 
   // 4. Costo Motore Termico/Wankel Accoppiato (se Ibrido):
   let coupledIceCost = 0;
@@ -401,40 +1137,24 @@ export function calculateElectricHybridCosts(
   );
 
   // 5. Costo di Sviluppo R&D e Capitale Impianti:
-  const chemistryComplexity =
-    config.batteryChemistry === 'SolidState'
-      ? 1.65
-      : config.batteryChemistry === 'NCA'
-        ? 1.2
-        : 1.0;
-  const motorComplexity =
-    config.electricMotorType === 'AxialFlux'
-      ? 1.55
-      : config.electricMotorType === 'IPM_SynRM'
-        ? 1.2
-        : 1.0;
-  const tierRdMultiplier =
-    config.priceTier === 'Lusso'
-      ? 1.6
-      : config.priceTier === 'Premium'
-        ? 1.25
-        : config.priceTier === 'Economica'
-          ? 0.75
-          : 1.0;
-
   const globalComplexity =
-    systemSpec.complexityFactor *
-    voltageSpec.costMultiplier *
-    chemistryComplexity *
-    motorComplexity *
-    tierRdMultiplier *
-    (1 + (layoutSpec.motorCount - 1) * 0.18);
-
-  const capitalCost = Math.round(systemSpec.unlockCost.capitalCost * globalComplexity);
-  const rdCost = Math.round(systemSpec.unlockCost.rdCost * globalComplexity);
+    systemSpec.complexityFactor * (1 + (motorCount - 1) * 0.18);
+  const capitalCost = Math.round(
+    (unitMotor.developmentCost.capitalCost * 0.55 +
+      batteryPack.developmentCost.capitalCost * 0.45 +
+      systemSpec.unlockCost.capitalCost * 0.5) *
+      globalComplexity,
+  );
+  const rdCost = Math.round(
+    (unitMotor.developmentCost.rdCost * 0.55 +
+      batteryPack.developmentCost.rdCost * 0.45 +
+      systemSpec.unlockCost.rdCost * 0.5) *
+      globalComplexity,
+  );
 
   return {
     unitProductionCost,
+    singleMotorUnitCost: unitMotor.unitProductionCost,
     batteryCost,
     motorSystemCost,
     inverterAndCoolingCost,
@@ -444,67 +1164,78 @@ export function calculateElectricHybridCosts(
       rdCost,
       minYear: Math.max(
         systemSpec.minYear,
-        motorSpec.minYear,
-        batterySpec.minYear,
-        coolingSpec.minYear,
+        unitMotor.developmentCost.minYear ?? 0,
+        batteryPack.developmentCost.minYear ?? 0,
       ),
     },
   };
 }
 
 /**
- * Simulazione completa del Banco Prova Elettrico e Ibrido (Modulo 1C):
- * - Punto 1: Fisica potenza/coppia reale e curva dinamometrica con Field Weakening (legge 1/RPM).
- * - Punto 2: Efficienza e consumi reali (Single RWD > Single FWD > Dual AWD > Tri/Quad AWD).
- * - Punto 3: Affidabilità dinamica (58% - 94%) e durata reale in km (stop ai 3 milioni di km!).
- * - Punto 5: Impatto reale di PriceTier (IGBT 86% -> SiC 97.5%) e ReferenceClass.
- * - Punto 6: Integrazione e sovrapposizione curva con il Motore Termico/Wankel scelto per MHEV/HEV/PHEV/EREV.
+ * Simulazione completa del Banco Prova Elettrico e Ibrido (Modulo 1.4 / 1C):
+ * - Separa `SingleElectricMotorTelemetry`, `BatteryPackTelemetry` e `PowertrainBenchConfig`.
+ * - Scala linearmente 1, 2, 3 o 4 motori (`1.0x`, `2.0x`, `3.0x`, `4.0x`, o `0.92x` per 1 motore + albero meccanico AWD).
+ * - Genera la curva dinamometrica combinata per `MHEV`, `FullHybrid` e `PHEV` calcolando prima
+ *   la curva reale del comparto elettrico a ogni step di RPM (limitata dalla potenza di scarica massima
+ *   della batteria selezionata) e sommandola positivamente alla curva del motore termico/Wankel scelto
+ *   (`CV = (Nm_totali * RPM) / 7023.5`).
+ * - Per `RangeExtender (EREV)`, usa il motore termico/Wankel scelto come generatore a regime ottimale
+ *   per caricare la batteria, mantenendo trazione 100% elettrica alle ruote.
  */
 export function simulateElectricHybridDyno(
-  config: ElectricHybridEngineConfigInput,
+  configInput: ElectricHybridEngineConfigInput | PowertrainBenchConfig,
   coupledIceInput?: CoupledIceEngineOption,
 ): EvHybridSimulationResult {
-  const motorSpec =
-    ELECTRIC_MOTOR_TYPES.find((m) => m.id === config.electricMotorType) ??
+  const bench = toPowertrainBenchConfig(configInput);
+
+  const motorTypeSpec =
+    ELECTRIC_MOTOR_TYPES.find((m) => m.id === bench.motor.electricMotorType) ??
     ELECTRIC_MOTOR_TYPES[0];
   const layoutSpec =
-    MOTOR_LAYOUT_CONFIGS.find((l) => l.id === config.motorLayout) ??
+    MOTOR_LAYOUT_CONFIGS.find((l) => l.id === bench.motorLayout) ??
+    MOTOR_LAYOUT_CONFIGS.find((l) => l.motorCount === bench.motorCount) ??
     MOTOR_LAYOUT_CONFIGS[0];
-  const batterySpec =
-    BATTERY_CHEMISTRIES.find((b) => b.id === config.batteryChemistry) ??
+  const batteryChemSpec =
+    BATTERY_CHEMISTRIES.find((b) => b.id === bench.battery.batteryChemistry) ??
     BATTERY_CHEMISTRIES[0];
   const coolingSpec =
-    ELECTRIC_COOLING_SYSTEMS.find((c) => c.id === config.coolingSystem) ??
+    ELECTRIC_COOLING_SYSTEMS.find((c) => c.id === bench.motor.coolingSystem) ??
     ELECTRIC_COOLING_SYSTEMS[1];
   const voltageSpec =
-    VOLTAGE_ARCHITECTURES.find((v) => v.voltage === config.voltageArchitecture) ??
+    VOLTAGE_ARCHITECTURES.find((v) => v.voltage === bench.motor.voltageArchitecture) ??
     VOLTAGE_ARCHITECTURES[0];
-  const tierSpec = PRICE_TIER_EV_SPECS[config.priceTier] ?? PRICE_TIER_EV_SPECS.Media;
+  const tierSpec = PRICE_TIER_EV_SPECS[bench.motor.priceTier] ?? PRICE_TIER_EV_SPECS.Media;
   const classSpec =
-    REFERENCE_CLASS_EV_SPECS[config.referenceClass] ?? REFERENCE_CLASS_EV_SPECS.Normale;
+    REFERENCE_CLASS_EV_SPECS[bench.motor.referenceClass] ??
+    REFERENCE_CLASS_EV_SPECS.Normale;
   const systemSpec =
-    HYBRID_SYSTEM_TYPES.find((s) => s.id === config.systemType) ??
+    HYBRID_SYSTEM_TYPES.find((s) => s.id === bench.systemType) ??
     HYBRID_SYSTEM_TYPES[0];
 
   const coupledIce = systemSpec.hasIceEngine
     ? (coupledIceInput ?? REFERENCE_HYBRID_ICE_ENGINES[1])
     : undefined;
 
-  // 1. Metriche di potenza e coppia elettrica:
+  // 1. Calcolo metriche comparto elettrico separato (Motore Singolo * Scala Lineare Banco + Batteria):
   const {
+    unitMotor,
+    batteryPack,
+    motorCount,
+    hasMechanicalAwdShaft,
     peakElectricPowerHp,
     peakElectricPowerKw,
     continuousPowerKw,
     peakElectricTorqueNm,
+    maxBatterySupportedElectricHp,
     cornerSpeedRpm,
     maxMotorRpm,
     cRatePeak,
-  } = calculateElectricOutputMetrics(config);
+  } = calculateElectricOutputMetrics(bench);
 
   // 2. Generazione Curva Dinamometrica:
-  const curve: DynoCurvePoint[] = [];
-  const iceOnlyCurve: DynoCurvePoint[] = [];
-  const electricOnlyCurve: DynoCurvePoint[] = [];
+  let curve: DynoCurvePoint[] = [];
+  let iceOnlyCurve: DynoCurvePoint[] = [];
+  let electricOnlyCurve: DynoCurvePoint[] = [];
 
   let peakPowerHp = 0;
   let peakPowerRpm = 0;
@@ -512,10 +1243,9 @@ export function simulateElectricHybridDyno(
   let peakTorqueRpm = 0;
   let redlineRpm = maxMotorRpm;
 
-  if (config.systemType === 'PureEV' || config.systemType === 'RangeExtender') {
+  if (bench.systemType === 'PureEV' || bench.systemType === 'RangeExtender') {
     // TRAZIONE 100% ELETTRICA ALLE RUOTE (BEV e Range Extender EREV):
-    // Da 0 RPM fino a cornerSpeedRpm: Coppia 100% costante, Potenza sale linearmente.
-    // Da cornerSpeedRpm fino a maxMotorRpm: Potenza costante a plateau, Coppia scende con legge 1 / RPM!
+    // Scala lineare esatta: Single = 1.0x, Dual = 2.0x, Tri = 3.0x, Quad = 4.0x (o 0.92x con albero AWD meccanico).
     redlineRpm = maxMotorRpm;
     const stepRpm = 250;
 
@@ -525,7 +1255,10 @@ export function simulateElectricHybridDyno(
 
       if (rpm <= cornerSpeedRpm) {
         currentTorqueNm = peakElectricTorqueNm;
-        currentPowerHp = Math.round((currentTorqueNm * rpm) / 7023.5);
+        currentPowerHp = Math.min(
+          peakElectricPowerHp,
+          Math.round((currentTorqueNm * rpm) / 7023.5),
+        );
       } else {
         currentPowerHp = peakElectricPowerHp;
         currentTorqueNm = Math.round((peakElectricPowerHp * 7023.5) / rpm);
@@ -547,102 +1280,36 @@ export function simulateElectricHybridDyno(
       }
     }
   } else if (coupledIce) {
-    // SISTEMI IBRIDI PARALLELI / SERIE-PARALLELI (MHEV 48V, Full Hybrid HEV, Plug-in Hybrid PHEV):
-    // Somma sul grafico la curva reale del Motore Termico/Wankel scelto con la spinta del motore elettrico!
-    redlineRpm = coupledIce.redlineRpm;
-    const minIceRpm = coupledIce.curve[0]?.rpm ?? 1000;
-    const stepRpm = 100;
+    // SISTEMI IBRIDI (MHEV, FullHybrid, PHEV):
+    // Usa l'algoritmo dedicato che calcola prima la curva reale del comparto elettrico a ogni step di RPM
+    // (limitata dalla potenza di scarica massima della batteria selezionata) e la somma positivamente
+    // alla curva del motore termico/Wankel scelto, ricalcolando i CV da CV = (Nm_totali * RPM) / 7023.5!
+    const combinedResult = generateCombinedHybridDynoCurve({
+      coupledIce,
+      peakElectricTorqueNm,
+      peakElectricPowerHp,
+      maxBatterySupportedElectricHp,
+      cornerSpeedRpm,
+      maxMotorRpm,
+    });
 
-    // Rapporto di accoppiamento giri tra motore elettrico e albero motore termico:
-    const rpmCouplingRatio = maxMotorRpm / Math.max(4000, redlineRpm);
-
-    for (let rpm = minIceRpm; rpm <= redlineRpm; rpm += stepRpm) {
-      const iceSample = sampleCurveAtRpm(coupledIce.curve, rpm);
-      const equivalentEvRpm = rpm * rpmCouplingRatio;
-
-      // Curva del contributo elettrico riportato all'albero combinato:
-      let evPowerContributionHp: number;
-      let evTorqueContributionNm: number;
-
-      if (config.systemType === 'MHEV') {
-        // MHEV 48V: forte Torque Fill ai bassi regimi (1000 - 3000 RPM) per azzerare il turbo-lag,
-        // poi sfuma progressivamente agli alti regimi dove l'ISG 48V raggiunge la saturazione di potenza
-        const lowRpmFill =
-          rpm <= 2600
-            ? 1.0
-            : Math.max(0.18, Math.exp(-Math.pow((rpm - 2600) / 2800, 1.6)));
-        evTorqueContributionNm = Math.round(peakElectricTorqueNm * lowRpmFill);
-        evPowerContributionHp = Math.min(
-          peakElectricPowerHp,
-          Math.round((evTorqueContributionNm * rpm) / 7023.5),
-        );
-        evTorqueContributionNm = Math.round((evPowerContributionHp * 7023.5) / rpm);
-      } else {
-        // HEV e PHEV: il motore elettrico eroga coppia piena fino al suo punto di Field Weakening
-        // e poi mantiene il plateau di potenza elettrica costante fino al limitatore!
-        if (equivalentEvRpm <= cornerSpeedRpm) {
-          evTorqueContributionNm = peakElectricTorqueNm;
-          evPowerContributionHp = Math.round(
-            peakElectricPowerHp * (equivalentEvRpm / cornerSpeedRpm),
-          );
-        } else {
-          evPowerContributionHp = peakElectricPowerHp;
-          evTorqueContributionNm = Math.round(
-            peakElectricTorqueNm * (cornerSpeedRpm / equivalentEvRpm),
-          );
-        }
-      }
-
-      const combinedTorqueNow = iceSample.torqueNm + evTorqueContributionNm;
-      const combinedPowerNow = iceSample.powerHp + evPowerContributionHp;
-
-      iceOnlyCurve.push({
-        rpm,
-        torqueNm: iceSample.torqueNm,
-        powerHp: iceSample.powerHp,
-      });
-      electricOnlyCurve.push({
-        rpm,
-        torqueNm: evTorqueContributionNm,
-        powerHp: evPowerContributionHp,
-      });
-      curve.push({
-        rpm,
-        torqueNm: combinedTorqueNow,
-        powerHp: combinedPowerNow,
-      });
-
-      if (combinedTorqueNow > peakTorqueNm) {
-        peakTorqueNm = combinedTorqueNow;
-        peakTorqueRpm = rpm;
-      }
-      if (combinedPowerNow > peakPowerHp) {
-        peakPowerHp = combinedPowerNow;
-        peakPowerRpm = rpm;
-      }
-    }
+    curve = combinedResult.curve;
+    iceOnlyCurve = combinedResult.iceOnlyCurve;
+    electricOnlyCurve = combinedResult.electricOnlyCurve;
+    peakPowerHp = combinedResult.peakPowerHp;
+    peakPowerRpm = combinedResult.peakPowerRpm;
+    peakTorqueNm = combinedResult.peakTorqueNm;
+    peakTorqueRpm = combinedResult.peakTorqueRpm;
+    redlineRpm = combinedResult.redlineRpm;
   }
 
-  // 3. Calcolo Pesi Reali del Powertrain (kg):
-  // Peso motori elettrici (Axial Flux pesa -44% rispetto ai radiali!)
-  const singleMotorWeightKg =
-    (22 + (peakElectricPowerKw / Math.max(1, layoutSpec.motorCount)) * 0.21) *
-    motorSpec.weightMultiplier;
+  // 3. Pesi del Powertrain (kg):
   const motorWeightKg = Math.round(
-    singleMotorWeightKg * layoutSpec.motorCount + layoutSpec.extraHardwareWeightKg,
+    unitMotor.dryWeightKg * motorCount + layoutSpec.extraHardwareWeightKg,
   );
-
-  // Peso pacco batteria (influenzato da densità Wh/kg e da ReferenceClass: Corsa -18%, Fuoristrada +6%):
-  const batteryWeightKg = Math.round(
-    ((config.batteryCapacityKwh * 1000) / batterySpec.cellDensityWhPerKg) *
-      batterySpec.packagingMultiplier *
-      classSpec.batteryPackWeightMultiplier,
-  );
-
-  // Peso inverter, cablaggi (800V/1000V più leggeri di 400V) e struttura (Fuoristrada blindato IP68 +46kg):
+  const batteryWeightKg = batteryPack.weightKg;
   const electronicsAndThermalKg = Math.round(
-    layoutSpec.motorCount * (config.priceTier === 'Lusso' ? 5.5 : 9.0) +
-      voltageSpec.cableWeightKg +
+    voltageSpec.cableWeightKg +
       coolingSpec.weightKg +
       classSpec.extraStructuralWeightKg,
   );
@@ -664,26 +1331,22 @@ export function simulateElectricHybridDyno(
     Math.round(motorWeightKg + batteryWeightKg + electronicsAndThermalKg + iceWetWeightKg),
   );
 
-  // 4. Punto 2: Efficienza del Sistema (%) e Consumi Energetici Reali (Wh/km e kWh/100km):
-  // - Single RWD: configurazione più efficiente (base 92.5%, consumo 1.000x)
-  // - Single FWD: -1.5% efficienza / +1.5% consumo (1.015x)
-  // - Dual-Motor AWD: +8.5% consumo (ridotto a +4.0% se ASM a induzione o sgancio anteriore!)
-  // - Tri-Motor / Quad-Motor: +14.5% / +17.5% consumo per attrito 3-4 riduttori e 4 inverter
+  // 4. Efficienza del Sistema (%) e Consumi Energetici Reali (Wh/km e kWh/100km):
   const hasLowDragFrontAxle =
-    motorSpec.hasZeroDragWhenCoasting || Boolean(config.hasFrontDisconnect);
+    motorTypeSpec.hasZeroDragWhenCoasting || Boolean(bench.hasFrontDisconnect);
 
-  const drivetrainConsumptionMult =
-    layoutSpec.id === 'DualMotor_eAWD' && hasLowDragFrontAxle
-      ? layoutSpec.consumptionPenaltyWithDisconnect // 1.04 (+4%)
+  const drivetrainConsumptionMult = hasMechanicalAwdShaft
+    ? 1.087 // Penalità attrito albero di trasmissione meccanico AWD (-8% resa)
+    : layoutSpec.id === 'DualMotor_eAWD' && hasLowDragFrontAxle
+      ? layoutSpec.consumptionPenaltyWithDisconnect
       : layoutSpec.id === 'TriMotor_TorqueVectoring' && hasLowDragFrontAxle
         ? layoutSpec.consumptionPenaltyWithDisconnect
         : layoutSpec.consumptionPenaltyMultiplier;
 
-  // Efficienza complessiva dell'asse elettrico (combinazione layout + tipo motore + inverter PriceTier + tensione):
   const rawSystemEfficiency =
-    layoutSpec.baseSystemEfficiencyPercent *
-    (motorSpec.baseEfficiencyPercent / 95.5) *
-    (tierSpec.inverterEfficiencyPercent / 93.5) +
+    (hasMechanicalAwdShaft ? 85.1 : layoutSpec.baseSystemEfficiencyPercent) *
+      (motorTypeSpec.baseEfficiencyPercent / 95.5) *
+      (tierSpec.inverterEfficiencyPercent / 93.5) +
     voltageSpec.efficiencyBonusPercent * 0.5 +
     (layoutSpec.id === 'DualMotor_eAWD' && hasLowDragFrontAxle ? 2.1 : 0);
 
@@ -691,7 +1354,6 @@ export function simulateElectricHybridDyno(
     Math.min(96.5, Math.max(78.0, rawSystemEfficiency)).toFixed(1),
   );
 
-  // Consumo energetico Wh/km (e kWh/100km):
   const baseWhPerKmAtRwd =
     118 + (wetWeightKg / 1000) * 38 + peakElectricPowerKw * 0.032;
 
@@ -699,78 +1361,47 @@ export function simulateElectricHybridDyno(
     baseWhPerKmAtRwd *
       drivetrainConsumptionMult *
       tierSpec.consumptionMultiplier *
-      (95.5 / motorSpec.baseEfficiencyPercent) *
+      (95.5 / motorTypeSpec.baseEfficiencyPercent) *
       (1 - voltageSpec.efficiencyBonusPercent / 100),
   );
   const efficiencyKwhPer100Km = Number((efficiencyWhPerKm / 10).toFixed(1));
 
-  // Autonomia elettrica WLTP (km):
-  const usableBufferRatio =
-    config.referenceClass === 'Corsa'
-      ? 0.98 // Corsa rimuove i buffer di sicurezza!
-      : config.referenceClass === 'Sport'
-        ? 0.94
-        : 0.90; // Buffer protettivo 10% su Normale/Comfort
-  const usableKwh = config.batteryCapacityKwh * usableBufferRatio;
   const estimatedRangeKm = Math.max(
     2,
-    Math.round((usableKwh * 1000) / Math.max(90, efficiencyWhPerKm)),
+    Math.round((batteryPack.usableCapacityKwh * 1000) / Math.max(90, efficiencyWhPerKm)),
   );
 
-  // Bilancio Energetico specifico per Range Extender (EREV):
+  // 5. Range Extender (EREV): il motore termico/Wankel scelto funge da generatore per caricare la batteria
   let erevGeneratorOutputKw: number | undefined;
   let erevCruisingDemandKw: number | undefined;
   let erevGeneratorRpm: number | undefined;
   let erevSelfSustaining: boolean | undefined;
   let erevTotalCombinedRangeKm: number | undefined;
 
-  if (config.systemType === 'RangeExtender' && coupledIce) {
-    // Il motore termico/Wankel scelto lavora al regime fisso di miglior rendimento (65% del redline)
+  if (bench.systemType === 'RangeExtender' && coupledIce) {
     erevGeneratorRpm = Math.round((coupledIce.redlineRpm * 0.62) / 100) * 100;
     const genSample = sampleCurveAtRpm(coupledIce.curve, erevGeneratorRpm);
-    // Conversione meccanico -> elettrico tramite generatore sincrono (resa ~92%)
     erevGeneratorOutputKw = Math.round(genSample.powerHp * 0.7355 * 0.92);
-    // Fabbisogno medio in crociera autostradale sostenuta (125 km/h):
     erevCruisingDemandKw = Math.round((efficiencyWhPerKm * 125) / 1000);
     erevSelfSustaining = erevGeneratorOutputKw >= erevCruisingDemandKw;
-    // Autonomia combinata (Batteria EV + Serbatoio benzina 45L per generatore):
-    const generatorRangeKm = Math.round(450 * (erevGeneratorOutputKw / Math.max(15, erevCruisingDemandKw) > 1 ? 1.15 : 0.85));
+    const generatorRangeKm = Math.round(
+      450 *
+        (erevGeneratorOutputKw / Math.max(15, erevCruisingDemandKw) > 1 ? 1.15 : 0.85),
+    );
     erevTotalCombinedRangeKm = estimatedRangeKm + generatorRangeKm;
   }
 
-  // 5. Punto 3: Affidabilità Dinamica (Range reale 58% - 94%) e Durata Reale in Km (STOP ai 3 milioni di km!):
-  // Calcolo penalità da stress di scarica (C-Rate) e regime massimo dei cuscinetti:
-  const cRateExcess = Math.max(0, cRatePeak - batterySpec.maxContinuousCRate);
+  // 6. Affidabilità Dinamica (58% - 94%) e Durata Stimata in Km:
+  const cRateExcess = Math.max(0, cRatePeak - batteryChemSpec.maxContinuousCRate);
   const cRateReliabilityPenalty = Math.min(12.0, cRateExcess * 2.2);
-
-  // Usura cuscinetti/riduttore ad altissimi regimi (> 17.500 RPM):
-  const highRpmBearingPenalty =
-    maxMotorRpm > 17500 ? ((maxMotorRpm - 17500) / 1000) * 1.6 : 0;
-
-  // Gestione classe Corsa e Sport con raffreddamento:
-  // Se Corsa o Sport è supportata da Immersione Dielettrica Diretta, la penalità termica è dimezzata!
-  let effectiveClassReliabilityDelta = classSpec.reliabilityDeltaPercent;
-  if (
-    (config.referenceClass === 'Corsa' || config.referenceClass === 'Sport') &&
-    coolingSpec.protectsHighDischargeCorsa
-  ) {
-    effectiveClassReliabilityDelta *= 0.45;
-  }
-
-  // Penalità complessità multi-motore (4 motori + 4 inverter hanno più componenti rispetto a 1 motore):
-  const multiMotorComplexityPenalty = (layoutSpec.motorCount - 1) * 1.4;
+  const multiMotorComplexityPenalty = (motorCount - 1) * 1.4;
 
   let rawReliability =
-    84.0 +
-    batterySpec.reliabilityDeltaPercent +
-    coolingSpec.reliabilityDeltaPercent + // Aria Passiva = -18%!
-    tierSpec.reliabilityDeltaPercent + // Economica -5.5%, Lusso +6.0%
-    effectiveClassReliabilityDelta -
+    unitMotor.reliabilityPercent * 0.45 +
+    batteryPack.reliabilityPercent * 0.55 -
     cRateReliabilityPenalty -
-    highRpmBearingPenalty -
     multiMotorComplexityPenalty;
 
-  // Se è un sistema Ibrido, l'affidabilità tiene conto anche del motore termico/Wankel accoppiato:
   if (systemSpec.hasIceEngine && coupledIce) {
     rawReliability = rawReliability * 0.62 + coupledIce.reliabilityPercent * 0.38 - 2.5;
   }
@@ -779,75 +1410,10 @@ export function simulateElectricHybridDyno(
     Math.min(94.0, Math.max(58.0, rawReliability)).toFixed(1),
   );
 
-  // Calcolo Durata Stimata in Km (Fine vita utile al 75-80% SoH + usura inverter/cuscinetti/riduttore):
-  // - LFP uso Normale/Comfort: 350.000 - 550.000 km
-  // - NMC / Stato Solido uso Normale/Comfort: 220.000 - 360.000 km
-  // - Configurazioni Sport ad alta scarica: 120.000 - 200.000 km
-  // - Classe Corsa: 15.000 - 45.000 km
-  const coolingLifespanFactor =
-    config.coolingSystem === 'Air'
-      ? 0.76
-      : config.coolingSystem === 'DirectDielectric'
-        ? 1.12
-        : 1.0;
-
   const cRateLifespanFactor = Math.max(0.68, 1.0 - cRateExcess * 0.055);
+  let estimatedLifespanKm = Math.round(batteryPack.estimatedLifespanKm * cRateLifespanFactor);
 
-  let estimatedLifespanKm: number;
-  if (config.referenceClass === 'Corsa') {
-    // Classe Corsa: rimuove i buffer batteria e spinge inverter al limite -> 15.000 - 45.000 km
-    const corsaBaseKm =
-      config.coolingSystem === 'DirectDielectric' ? 34_000 : 21_000;
-    const rawCorsaKm = Math.round(
-      corsaBaseKm *
-        tierSpec.lifespanMultiplier *
-        cRateLifespanFactor *
-        (config.batteryChemistry === 'LFP' ? 1.15 : 1.0),
-    );
-    estimatedLifespanKm = Math.max(15_000, Math.min(45_000, rawCorsaKm));
-  } else if (config.referenceClass === 'Sport') {
-    // Classe Sport ad alta scarica: 120.000 - 200.000 km
-    const sportBaseKm =
-      config.batteryChemistry === 'LFP'
-        ? 172_000
-        : config.batteryChemistry === 'NCA'
-          ? 138_000
-          : 156_000;
-    const rawSportKm = Math.round(
-      sportBaseKm *
-        tierSpec.lifespanMultiplier *
-        coolingLifespanFactor *
-        cRateLifespanFactor,
-    );
-    estimatedLifespanKm = Math.max(120_000, Math.min(200_000, rawSportKm));
-  } else {
-    // Uso Normale, Comfort o Fuoristrada:
-    const classLifespanMult =
-      config.referenceClass === 'Comfort'
-        ? 1.08
-        : config.referenceClass === 'Fuoristrada'
-          ? 0.94
-          : 1.0;
-    const rawNormalKm = Math.round(
-      batterySpec.baseLifespanKm *
-        tierSpec.lifespanMultiplier *
-        coolingLifespanFactor *
-        cRateLifespanFactor *
-        classLifespanMult,
-    );
-
-    if (config.batteryChemistry === 'LFP') {
-      // LFP uso normale: 350.000 - 550.000 km
-      estimatedLifespanKm = Math.max(350_000, Math.min(550_000, rawNormalKm));
-    } else {
-      // NMC / NCA / Stato Solido uso normale: 220.000 - 360.000 km
-      estimatedLifespanKm = Math.max(220_000, Math.min(360_000, rawNormalKm));
-    }
-  }
-
-  // Se è Ibrido con motore termico/Wankel (es. un Wankel che dura 80.000 km), la durata del powertrain
-  // è vincolata anche dalla revisione dell'unità termica/rotativa accoppiata:
-  if (systemSpec.hasIceEngine && coupledIce && config.referenceClass !== 'Corsa') {
+  if (systemSpec.hasIceEngine && coupledIce && bench.motor.referenceClass !== 'Corsa') {
     estimatedLifespanKm = Math.round(
       Math.min(
         estimatedLifespanKm,
@@ -855,10 +1421,9 @@ export function simulateElectricHybridDyno(
       ),
     );
   }
-  // Arrotonda ai 1.000 km per pulizia visiva
   estimatedLifespanKm = Math.round(estimatedLifespanKm / 1000) * 1000;
 
-  // 6. Emissioni CO2 (g/km):
+  // 7. Emissioni CO2 (g/km) e Costi:
   let emissionsGPerKm = 0;
   if (systemSpec.hasIceEngine && coupledIce) {
     emissionsGPerKm = Math.max(
@@ -871,23 +1436,35 @@ export function simulateElectricHybridDyno(
     );
   }
 
-  const { unitProductionCost } = calculateElectricHybridCosts(config, coupledIce);
+  const { unitProductionCost } = calculateElectricHybridCosts(bench, coupledIce);
+
+  const effectiveMotorLayout: MotorLayoutConfig = hasMechanicalAwdShaft
+    ? 'SingleMotor_MechanicalAWD'
+    : bench.motorLayout ?? layoutSpec.id;
 
   const specs: ElectricHybridSpecs = {
-    systemType: config.systemType,
-    electricMotorType: config.electricMotorType,
-    motorLayout: config.motorLayout,
-    motorCount: layoutSpec.motorCount,
-    hasFrontDisconnect: config.hasFrontDisconnect,
-    statorDiameterMm: config.statorDiameterMm,
-    rotorLengthMm: config.rotorLengthMm,
-    batteryChemistry: config.batteryChemistry,
-    batteryCapacityKwh: config.batteryCapacityKwh,
-    voltageArchitecture: config.voltageArchitecture,
-    coolingSystem: config.coolingSystem,
-    inverterTech: tierSpec.mappedInverterTech,
-    inverterSummaryName: tierSpec.inverterName,
-    inverterEfficiencyPercent: tierSpec.inverterEfficiencyPercent,
+    systemType: bench.systemType,
+    electricMotorType: bench.motor.electricMotorType,
+    motorLayout: effectiveMotorLayout,
+    motorCount,
+    hasMechanicalAwdShaft,
+    hasFrontDisconnect: bench.hasFrontDisconnect,
+    statorDiameterMm: bench.motor.statorDiameterMm,
+    rotorLengthMm: bench.motor.rotorLengthMm,
+    batteryChemistry: bench.battery.batteryChemistry,
+    batteryCapacityKwh: bench.battery.batteryCapacityKwh,
+    voltageArchitecture: bench.motor.voltageArchitecture,
+    coolingSystem: bench.motor.coolingSystem,
+    inverterTech: unitMotor.inverterTech,
+    inverterSummaryName: unitMotor.inverterSummaryName,
+    inverterEfficiencyPercent: unitMotor.inverterEfficiencyPercent,
+    singleMotorSpec: unitMotor.spec,
+    unitMotorPowerHp: unitMotor.peakPowerHp,
+    unitMotorTorqueNm: unitMotor.peakTorqueNm,
+    unitMotorCost: unitMotor.unitProductionCost,
+    batteryPackSpec: batteryPack.spec,
+    maxBatteryDischargePowerKw: batteryPack.maxDischargePowerKw,
+    maxBatteryDischargePowerHp: maxBatterySupportedElectricHp,
     peakElectricPowerKw,
     peakElectricPowerHp,
     continuousPowerKw,
@@ -895,15 +1472,15 @@ export function simulateElectricHybridDyno(
     cornerSpeedRpm,
     maxRpm: maxMotorRpm,
     cRatePeak,
-    gearboxType: config.gearboxType,
-    gearRatio: config.gearRatio,
+    gearboxType: bench.gearboxType,
+    gearRatio: bench.gearRatio,
     batteryWeightKg,
     motorWeightKg,
     totalPowertrainWeightKg: wetWeightKg,
     estimatedRangeKm,
     efficiencyWhPerKm,
     efficiencyKwhPer100Km,
-    batteryLifespanCycles: batterySpec.cycleLife,
+    batteryLifespanCycles: batteryPack.cycleLife,
     coupledIceId: coupledIce?.id,
     coupledIceName: coupledIce?.name,
     coupledIcePropulsionType: coupledIce?.propulsionType,
@@ -924,6 +1501,9 @@ export function simulateElectricHybridDyno(
     iceOnlyCurve: iceOnlyCurve.length > 0 ? iceOnlyCurve : undefined,
     electricOnlyCurve: electricOnlyCurve.length > 0 ? electricOnlyCurve : undefined,
     coupledIceOption: coupledIce,
+    singleMotorTelemetry: unitMotor,
+    batteryPackTelemetry: batteryPack,
+    benchConfig: bench,
     peakPowerHp,
     peakPowerRpm,
     peakTorqueNm,

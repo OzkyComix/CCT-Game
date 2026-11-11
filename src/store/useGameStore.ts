@@ -13,8 +13,10 @@ import {
   WANKEL_PORTING_TYPES,
 } from '../data/historicalEras';
 import {
+  type BatteryPackEntity,
   type ChassisEntity,
   type ComponentEntity,
+  type ElectricMotorEntity,
   type CoupledIceEngineOption,
   type DualCurrencyCost,
   type DualCurrencyResources,
@@ -62,6 +64,10 @@ export interface GameState {
   /** Bozza live del Motore Wankel attualmente configurato nella Tab 1B (per test Ibridi 1C) */
   liveWankelDraft: CoupledIceEngineOption;
 
+  /** Libreria Modulo 1.4: singole unità motore elettrico e pacchi batteria salvati separatamente */
+  savedElectricMotors: ElectricMotorEntity[];
+  savedBatteryPacks: BatteryPackEntity[];
+
   // Azioni Doppia Valuta & Gate di Validazione
   validateDualCurrencyGate: (cost: DualCurrencyCost) => DualCurrencyGateResult;
   spendDualCurrency: (actionName: string, cost: DualCurrencyCost) => DualCurrencyGateResult;
@@ -75,6 +81,8 @@ export interface GameState {
   toggleEngineB2B: (engineId: string) => void;
   setLivePistonDraft: (draft: CoupledIceEngineOption) => void;
   setLiveWankelDraft: (draft: CoupledIceEngineOption) => void;
+  saveElectricMotorToLibrary: (motor: ElectricMotorEntity) => DualCurrencyGateResult;
+  saveBatteryPackToLibrary: (pack: BatteryPackEntity) => DualCurrencyGateResult;
 
   // Azioni Database Modulare
   addCustomComponent: (params: {
@@ -677,6 +685,8 @@ export const useGameStore = create<GameState>((set, get) => ({
       { rpm: 8500, torqueNm: 268, powerHp: 324 },
     ],
   },
+  savedElectricMotors: [],
+  savedBatteryPacks: [],
   transactionLog: [
     {
       id: 'tx-init-1',
@@ -826,6 +836,30 @@ export const useGameStore = create<GameState>((set, get) => ({
     set(() => ({
       liveWankelDraft: draft,
     })),
+
+  saveElectricMotorToLibrary: (motor) => {
+    const gate = get().spendDualCurrency(
+      `Omologazione Motore Elettrico: ${motor.name} (${motor.codeName})`,
+      motor.developmentCost,
+    );
+    if (!gate.allowed) return gate;
+    set((state) => ({
+      savedElectricMotors: [motor, ...state.savedElectricMotors],
+    }));
+    return gate;
+  },
+
+  saveBatteryPackToLibrary: (pack) => {
+    const gate = get().spendDualCurrency(
+      `Omologazione Pacco Batteria: ${pack.name} (${pack.codeName})`,
+      pack.developmentCost,
+    );
+    if (!gate.allowed) return gate;
+    set((state) => ({
+      savedBatteryPacks: [pack, ...state.savedBatteryPacks],
+    }));
+    return gate;
+  },
 
   addCustomComponent: (params) => {
     const gate = get().spendDualCurrency(`R&D Componente: ${params.name}`, params.cost);

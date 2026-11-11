@@ -290,9 +290,19 @@ export type ElectricMotorType =
 export type MotorLayoutConfig =
   | 'SingleMotor_FWD'
   | 'SingleMotor_RWD'
+  | 'SingleMotor_MechanicalAWD'
   | 'DualMotor_eAWD'
   | 'TriMotor_TorqueVectoring'
   | 'QuadMotor_Independent';
+
+export type BenchElectricMotorCount = 1 | 2 | 3 | 4;
+
+export type BenchElectricDriveArrangement =
+  | 'Single_1x'
+  | 'Single_MechanicalAWD' // 1 motore elettrico con albero di trasmissione meccanico AWD (-8% perdita)
+  | 'Dual_2x'
+  | 'Tri_3x'
+  | 'Quad_4x';
 
 export type BatteryChemistry = 'LFP' | 'NMC811' | 'NCA' | 'SolidState';
 
@@ -301,6 +311,162 @@ export type ElectricCoolingSystem = 'Air' | 'LiquidGlycol' | 'DirectDielectric';
 export type InverterTech = 'Silicon_IGBT' | 'SiliconCarbide_SiC' | 'GalliumNitride_GaN';
 
 export type VoltageArchitecture = 400 | 800 | 1000;
+
+/**
+ * 1. Singola Unità Motore Elettrico Universale (Modulo 1.4):
+ * Definita esclusivamente da tecnologia, diametro statore, lunghezza rotore,
+ * tensione, raffreddamento, fascia prezzo e classe.
+ * Non contiene alcun parametro di posizionamento (Anteriore/Posteriore)
+ * o orientamento (Trasversale/Longitudinale), né nel modello né nel prezzo.
+ */
+export interface ElectricMotorSpec {
+  id?: string;
+  name?: string;
+  codeName?: string;
+  electricMotorType: ElectricMotorType;
+  statorDiameterMm: number; // 150 - 340 mm
+  rotorLengthMm: number; // 80 - 280 mm
+  voltageArchitecture: VoltageArchitecture; // 400 | 800 | 1000
+  coolingSystem: ElectricCoolingSystem; // Air | LiquidGlycol | DirectDielectric
+  priceTier: PriceTier;
+  referenceClass: ReferenceClass;
+  maxMotorRpm?: number; // 14000 - 22000 rpm
+}
+
+/**
+ * Telemetria e costi calcolati per la singola unità motore elettrico universale (1.0x).
+ */
+export interface SingleElectricMotorTelemetry {
+  spec: ElectricMotorSpec;
+  statorVolumeCc: number;
+  dimensionsMm: DimensionsLWH;
+  inverterDimensionsMm: DimensionsLWH;
+  inverterTech: InverterTech;
+  inverterSummaryName: string;
+  inverterEfficiencyPercent: number;
+  peakPowerHp: number;
+  peakPowerKw: number;
+  continuousPowerKw: number;
+  peakTorqueNm: number;
+  cornerSpeedRpm: number;
+  maxMotorRpm: number;
+  efficiencyPercent: number;
+  dryWeightKg: number;
+  wetWeightKg: number;
+  reliabilityPercent: number;
+  estimatedLifespanKm: number;
+  motorHardwareCost: number;
+  inverterAndCoolingCost: number;
+  unitProductionCost: number;
+  developmentCost: DualCurrencyCost;
+  curve: DynoCurvePoint[];
+}
+
+/**
+ * 2. Pacco Batteria Indipendente (Modulo 1.4):
+ * Definito da chimica, kWh, tensione, raffreddamento, fascia prezzo e classe,
+ * valutabile e salvabile separatamente.
+ */
+export interface BatteryPackSpec {
+  id?: string;
+  name?: string;
+  codeName?: string;
+  batteryChemistry: BatteryChemistry; // LFP | NMC811 | NCA | SolidState
+  batteryCapacityKwh: number; // 0.8 - 150 kWh
+  voltageArchitecture: VoltageArchitecture; // 400 | 800 | 1000
+  coolingSystem: ElectricCoolingSystem; // Air | LiquidGlycol | DirectDielectric
+  priceTier: PriceTier;
+  referenceClass: ReferenceClass;
+}
+
+/**
+ * Telemetria, capacità di scarica massima e costi calcolati per il pacco batteria indipendente.
+ */
+export interface BatteryPackTelemetry {
+  spec: BatteryPackSpec;
+  batteryCapacityKwh: number;
+  usableCapacityKwh: number;
+  maxDischargePowerKw: number;
+  maxDischargePowerHp: number;
+  maxContinuousDischargePowerKw: number;
+  peakDischargeCRate: number;
+  maxContinuousCRate: number;
+  weightKg: number;
+  dimensionsMm: DimensionsLWH;
+  costPerKwh: number;
+  cellsCost: number;
+  bmsAndThermalCost: number;
+  unitProductionCost: number;
+  reliabilityPercent: number;
+  estimatedLifespanKm: number;
+  cycleLife: number;
+  developmentCost: DualCurrencyCost;
+}
+
+/**
+ * Singola unità motore elettrico omologata e salvata nella libreria componenti (riutilizzabile al banco).
+ */
+export interface ElectricMotorEntity {
+  id: string;
+  name: string;
+  codeName: string;
+  ownerSubBrandId: string;
+  createdYear: number;
+  spec: ElectricMotorSpec;
+  peakPowerHp: number;
+  peakTorqueNm: number;
+  cornerSpeedRpm: number;
+  maxMotorRpm: number;
+  dryWeightKg: number;
+  reliabilityPercent: number;
+  estimatedLifespanKm: number;
+  unitProductionCost: number;
+  developmentCost: DualCurrencyCost;
+}
+
+/**
+ * Pacco batteria omologato e salvato nella libreria componenti (riutilizzabile al banco).
+ */
+export interface BatteryPackEntity {
+  id: string;
+  name: string;
+  codeName: string;
+  ownerSubBrandId: string;
+  createdYear: number;
+  spec: BatteryPackSpec;
+  maxDischargePowerKw: number;
+  weightKg: number;
+  reliabilityPercent: number;
+  estimatedLifespanKm: number;
+  unitProductionCost: number;
+  developmentCost: DualCurrencyCost;
+}
+
+/**
+ * 3. Simulatore di Test al Banco Prova (Modulo 1.4):
+ * Stato separato che permette di testare al banco 1, 2, 3 o 4 motori elettrici uguali
+ * (scala lineare esatta: Single = 1.0x, Dual = 2.0x, Tri = 3.0x, Quad = 4.0x, oppure
+ * 1 motore elettrico con albero di trasmissione meccanico AWD con -8% di perdita)
+ * e di accoppiarli a qualsiasi motore termico o Wankel nelle modalità MHEV, FullHybrid,
+ * PHEV e RangeExtender (EREV, dove il termico/Wankel funge da generatore per caricare la batteria).
+ */
+export interface PowertrainBenchConfig {
+  systemType: HybridSystemType;
+  motorCount: BenchElectricMotorCount; // 1 | 2 | 3 | 4 (scala lineare 1.0x, 2.0x, 3.0x, 4.0x)
+  /** Se true (con motorCount === 1), applica la perdita del -8% (0.92x) dell'albero di trasmissione meccanico AWD */
+  hasMechanicalAwdShaft?: boolean;
+  benchArrangement?: BenchElectricDriveArrangement;
+  motorLayout?: MotorLayoutConfig;
+  hasFrontDisconnect?: boolean;
+  gearboxType: 'SingleSpeedDirect' | 'TwoSpeedDualClutch';
+  gearRatio: number;
+  /** ID del motore termico/Wankel selezionato per MHEV, FullHybrid, PHEV o RangeExtender (EREV) */
+  coupledIceOptionId?: string;
+  /** Singola unità motore elettrico universale in prova */
+  motor: ElectricMotorSpec;
+  /** Pacco batteria indipendente selezionato */
+  battery: BatteryPackSpec;
+}
 
 /**
  * Rappresenta un motore termico (Pistoni 1A o Wankel 1B) selezionabile per accoppiamento Ibrido
@@ -338,6 +504,7 @@ export interface ElectricHybridSpecs {
   electricMotorType: ElectricMotorType;
   motorLayout: MotorLayoutConfig;
   motorCount: number;
+  hasMechanicalAwdShaft?: boolean;
   hasFrontDisconnect?: boolean;
   statorDiameterMm: number;
   rotorLengthMm: number;
@@ -348,6 +515,15 @@ export interface ElectricHybridSpecs {
   inverterTech: InverterTech;
   inverterSummaryName?: string;
   inverterEfficiencyPercent?: number;
+  /** Specifica separata della singola unità motore elettrico universale (1.0x) */
+  singleMotorSpec?: ElectricMotorSpec;
+  unitMotorPowerHp?: number;
+  unitMotorTorqueNm?: number;
+  unitMotorCost?: number;
+  /** Specifica separata del pacco batteria indipendente */
+  batteryPackSpec?: BatteryPackSpec;
+  maxBatteryDischargePowerKw?: number;
+  maxBatteryDischargePowerHp?: number;
   peakElectricPowerKw: number;
   peakElectricPowerHp?: number;
   continuousPowerKw: number;
@@ -385,6 +561,8 @@ export interface ElectricHybridEngineConfigInput {
   systemType: HybridSystemType;
   electricMotorType: ElectricMotorType;
   motorLayout: MotorLayoutConfig;
+  motorCount?: BenchElectricMotorCount;
+  hasMechanicalAwdShaft?: boolean;
   hasFrontDisconnect?: boolean;
   statorDiameterMm: number; // 150 - 340 mm
   rotorLengthMm: number; // 80 - 280 mm
@@ -406,6 +584,10 @@ export interface ElectricHybridEngineConfigInput {
   iceTurbocharged?: boolean;
   priceTier: PriceTier;
   referenceClass: ReferenceClass;
+  /** Configurazione separata opzionale della singola unità motore */
+  motorSpec?: ElectricMotorSpec;
+  /** Configurazione separata opzionale del pacco batteria */
+  batterySpec?: BatteryPackSpec;
 }
 
 export interface DynoCurvePoint {

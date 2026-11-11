@@ -36,7 +36,9 @@ import {
 import { evaluateEngineBayCompatibility } from '../../math/volumeMath';
 import { useGameStore } from '../../store/useGameStore';
 import type {
+  BatteryPackEntity,
   CoupledIceEngineOption,
+  ElectricMotorEntity,
   DynoCurvePoint,
   ElectricHybridEngineConfigInput,
   EngineEntity,
@@ -553,6 +555,10 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
     livePistonDraft,
     liveWankelDraft,
     saveEngineToDatabase,
+    savedElectricMotors,
+    savedBatteryPacks,
+    saveElectricMotorToLibrary,
+    saveBatteryPackToLibrary,
   } = useGameStore();
 
   // Stato configurazione Powertrain Elettrico/Ibrido (Fase 1.4)
@@ -617,21 +623,119 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
     );
   }, [availableCoupledIceEngines, config.coupledIceOptionId, livePistonDraft]);
 
+  // Se è stato caricato un Pacco Batteria salvato (BatteryPackSpec indipendente), mantiene la sua
+  // tensione/raffreddamento/fascia/classe separati dal motore, sincronizzando solo chimica e kWh dagli slider.
+  const effectiveConfig: ElectricHybridEngineConfigInput = useMemo(
+    () =>
+      config.batterySpec
+        ? {
+            ...config,
+            batterySpec: {
+              ...config.batterySpec,
+              batteryChemistry: config.batteryChemistry,
+              batteryCapacityKwh: config.batteryCapacityKwh,
+            },
+          }
+        : config,
+    [config],
+  );
+
   // Calcoli Matematici e Telemetrici Real-Time (da src/math/evHybridMath.ts)
   const geometry = useMemo(
-    () => calculateElectricHybridGeometryAndDimensions(config, selectedCoupledIce),
-    [config, selectedCoupledIce],
+    () => calculateElectricHybridGeometryAndDimensions(effectiveConfig, selectedCoupledIce),
+    [effectiveConfig, selectedCoupledIce],
   );
 
   const costs = useMemo(
-    () => calculateElectricHybridCosts(config, selectedCoupledIce),
-    [config, selectedCoupledIce],
+    () => calculateElectricHybridCosts(effectiveConfig, selectedCoupledIce),
+    [effectiveConfig, selectedCoupledIce],
   );
 
   const telemetry = useMemo(
-    () => simulateElectricHybridDyno(config, selectedCoupledIce),
-    [config, selectedCoupledIce],
+    () => simulateElectricHybridDyno(effectiveConfig, selectedCoupledIce),
+    [effectiveConfig, selectedCoupledIce],
   );
+
+  const unitMotor = telemetry.singleMotorTelemetry;
+  const batteryPack = telemetry.batteryPackTelemetry;
+
+  const [motorLibName, setMotorLibName] = useState<string>('E-Motor PSM 235');
+  const [motorLibCode, setMotorLibCode] = useState<string>('EM-235');
+  const [batteryLibName, setBatteryLibName] = useState<string>('Pacco NMC 75 kWh');
+  const [batteryLibCode, setBatteryLibCode] = useState<string>('BP-75');
+
+  const handleSaveMotor = () => {
+    const entity: ElectricMotorEntity = {
+      id: `emot-${Date.now()}`,
+      name: motorLibName,
+      codeName: motorLibCode,
+      ownerSubBrandId: selectedSubBrandId,
+      createdYear: currentYear,
+      spec: { ...unitMotor.spec, name: motorLibName, codeName: motorLibCode },
+      peakPowerHp: unitMotor.peakPowerHp,
+      peakTorqueNm: unitMotor.peakTorqueNm,
+      cornerSpeedRpm: unitMotor.cornerSpeedRpm,
+      maxMotorRpm: unitMotor.maxMotorRpm,
+      dryWeightKg: unitMotor.dryWeightKg,
+      reliabilityPercent: unitMotor.reliabilityPercent,
+      estimatedLifespanKm: unitMotor.estimatedLifespanKm,
+      unitProductionCost: unitMotor.unitProductionCost,
+      developmentCost: unitMotor.developmentCost,
+    };
+    const res = saveElectricMotorToLibrary(entity);
+    setFeedbackBanner(
+      res.allowed
+        ? { type: 'ok', msg: `Motore elettrico "${entity.name}" salvato in libreria (${entity.peakPowerHp} CV / ${entity.peakTorqueNm} Nm per unità).` }
+        : { type: 'err', msg: res.reason ?? 'Risorse insufficienti per omologare il motore elettrico.' },
+    );
+  };
+
+  const handleSaveBattery = () => {
+    const entity: BatteryPackEntity = {
+      id: `bpack-${Date.now()}`,
+      name: batteryLibName,
+      codeName: batteryLibCode,
+      ownerSubBrandId: selectedSubBrandId,
+      createdYear: currentYear,
+      spec: { ...batteryPack.spec, name: batteryLibName, codeName: batteryLibCode },
+      maxDischargePowerKw: batteryPack.maxDischargePowerKw,
+      weightKg: batteryPack.weightKg,
+      reliabilityPercent: batteryPack.reliabilityPercent,
+      estimatedLifespanKm: batteryPack.estimatedLifespanKm,
+      unitProductionCost: batteryPack.unitProductionCost,
+      developmentCost: batteryPack.developmentCost,
+    };
+    const res = saveBatteryPackToLibrary(entity);
+    setFeedbackBanner(
+      res.allowed
+        ? { type: 'ok', msg: `Pacco batteria "${entity.name}" salvato in libreria (${entity.spec.batteryCapacityKwh} kWh, ${entity.maxDischargePowerKw} kW scarica max).` }
+        : { type: 'err', msg: res.reason ?? 'Risorse insufficienti per omologare il pacco batteria.' },
+    );
+  };
+
+  const loadMotorToBench = (m: ElectricMotorEntity) => {
+    setConfig((prev) => ({
+      ...prev,
+      electricMotorType: m.spec.electricMotorType,
+      statorDiameterMm: m.spec.statorDiameterMm,
+      rotorLengthMm: m.spec.rotorLengthMm,
+      voltageArchitecture: m.spec.voltageArchitecture,
+      coolingSystem: m.spec.coolingSystem,
+      priceTier: m.spec.priceTier,
+      referenceClass: m.spec.referenceClass,
+      maxMotorRpm: m.spec.maxMotorRpm ?? prev.maxMotorRpm,
+      inverterTech: PRICE_TIER_EV_SPECS[m.spec.priceTier].mappedInverterTech,
+    }));
+  };
+
+  const loadBatteryToBench = (b: BatteryPackEntity) => {
+    setConfig((prev) => ({
+      ...prev,
+      batteryChemistry: b.spec.batteryChemistry,
+      batteryCapacityKwh: b.spec.batteryCapacityKwh,
+      batterySpec: { ...b.spec },
+    }));
+  };
 
   const currentLegalEmissionLimit = useMemo(
     () => getLegalEmissionLimitForYear(currentYear),
@@ -1531,6 +1635,151 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
             </div>
           </section>
 
+          {/* SEZIONE 3B: LIBRERIA COMPONENTI SEPARATI (MOTORE SINGOLO / PACCO BATTERIA) & BANCO */}
+          <section className="rounded-xl border border-violet-500/50 bg-violet-950/10 p-4 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-violet-800/60 pb-2">
+              <div className="flex items-center gap-2">
+                <Layers className="w-4 h-4 text-violet-400" />
+                <h2 className="text-xs font-bold font-mono uppercase tracking-wider text-violet-200">
+                  Componenti Separati: Motore Singolo • Pacco Batteria • Banco Prova
+                </h2>
+              </div>
+              <span className="text-[11px] font-mono text-violet-300 font-semibold">
+                Banco: {telemetry.specs.motorCount}× motori
+                {telemetry.specs.hasMechanicalAwdShaft ? ' + albero AWD (0.92×)' : ` (${telemetry.specs.motorCount}.0×)`}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 font-mono text-xs">
+              {/* Singola unità motore */}
+              <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-2">
+                <div className="text-[10px] text-slate-400 uppercase">Singola Unità Motore (1.0×)</div>
+                <div className="text-sky-300 font-bold text-sm">
+                  {unitMotor.peakPowerHp} CV • {unitMotor.peakTorqueNm} Nm
+                </div>
+                <div className="text-[10px] text-slate-400">
+                  FW {unitMotor.cornerSpeedRpm} RPM • Max {unitMotor.maxMotorRpm} RPM • {unitMotor.dryWeightKg} kg
+                </div>
+                <div className="text-[10px] text-amber-300">
+                  Costo unità: ${unitMotor.unitProductionCost.toLocaleString('it-IT')} (indipendente da posizione/orientamento)
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <input
+                    type="text"
+                    value={motorLibName}
+                    onChange={(e) => setMotorLibName(e.target.value)}
+                    className="px-2 py-1 rounded bg-slate-900 border border-slate-800 text-slate-100 text-[11px]"
+                  />
+                  <input
+                    type="text"
+                    value={motorLibCode}
+                    onChange={(e) => setMotorLibCode(e.target.value)}
+                    className="px-2 py-1 rounded bg-slate-900 border border-slate-800 text-slate-100 text-[11px]"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSaveMotor}
+                  className="w-full px-3 py-1.5 rounded bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  Salva Motore Singolo (${unitMotor.developmentCost.capitalCost.toLocaleString('it-IT')} • {unitMotor.developmentCost.rdCost} R&D)
+                </button>
+              </div>
+
+              {/* Pacco batteria */}
+              <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-2">
+                <div className="flex items-center justify-between text-[10px] text-slate-400 uppercase">
+                  <span>Pacco Batteria Indipendente</span>
+                  {config.batterySpec && (
+                    <button
+                      type="button"
+                      onClick={() => setConfig((prev) => ({ ...prev, batterySpec: undefined }))}
+                      className="text-rose-300 normal-case hover:text-rose-200 cursor-pointer"
+                    >
+                      Scollega pacco salvato
+                    </button>
+                  )}
+                </div>
+                <div className="text-emerald-300 font-bold text-sm">
+                  {batteryPack.batteryCapacityKwh} kWh {batteryPack.spec.batteryChemistry} • {batteryPack.spec.voltageArchitecture}V
+                </div>
+                <div className="text-[10px] text-slate-400">
+                  Scarica max {batteryPack.maxDischargePowerKw} kW ({batteryPack.maxDischargePowerHp} CV) • {batteryPack.weightKg} kg
+                </div>
+                <div className="text-[10px] text-amber-300">
+                  Costo pacco: ${batteryPack.unitProductionCost.toLocaleString('it-IT')} ({batteryPack.costPerKwh} $/kWh + BMS)
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <input
+                    type="text"
+                    value={batteryLibName}
+                    onChange={(e) => setBatteryLibName(e.target.value)}
+                    className="px-2 py-1 rounded bg-slate-900 border border-slate-800 text-slate-100 text-[11px]"
+                  />
+                  <input
+                    type="text"
+                    value={batteryLibCode}
+                    onChange={(e) => setBatteryLibCode(e.target.value)}
+                    className="px-2 py-1 rounded bg-slate-900 border border-slate-800 text-slate-100 text-[11px]"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSaveBattery}
+                  className="w-full px-3 py-1.5 rounded bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  Salva Pacco Batteria (${batteryPack.developmentCost.capitalCost.toLocaleString('it-IT')} • {batteryPack.developmentCost.rdCost} R&D)
+                </button>
+              </div>
+            </div>
+
+            {/* Librerie salvate: carica al banco */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 font-mono text-[11px]">
+              <div className="space-y-1.5">
+                <div className="text-[10px] text-slate-400 uppercase">Motori salvati ({savedElectricMotors.length})</div>
+                {savedElectricMotors.length === 0 ? (
+                  <div className="text-slate-500 text-[10px]">Nessun motore salvato.</div>
+                ) : (
+                  savedElectricMotors.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => loadMotorToBench(m)}
+                      className="w-full p-2 rounded border border-slate-800 bg-slate-950 hover:border-sky-500 text-left cursor-pointer"
+                    >
+                      <div className="font-bold text-slate-100">{m.name} ({m.codeName})</div>
+                      <div className="text-[10px] text-sky-300">
+                        {m.peakPowerHp} CV • {m.peakTorqueNm} Nm • ${m.unitProductionCost.toLocaleString('it-IT')} → Carica al banco
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <div className="text-[10px] text-slate-400 uppercase">Pacchi batteria salvati ({savedBatteryPacks.length})</div>
+                {savedBatteryPacks.length === 0 ? (
+                  <div className="text-slate-500 text-[10px]">Nessun pacco salvato.</div>
+                ) : (
+                  savedBatteryPacks.map((b) => (
+                    <button
+                      key={b.id}
+                      type="button"
+                      onClick={() => loadBatteryToBench(b)}
+                      className="w-full p-2 rounded border border-slate-800 bg-slate-950 hover:border-emerald-500 text-left cursor-pointer"
+                    >
+                      <div className="font-bold text-slate-100">{b.name} ({b.codeName})</div>
+                      <div className="text-[10px] text-emerald-300">
+                        {b.spec.batteryCapacityKwh} kWh {b.spec.batteryChemistry} • {b.maxDischargePowerKw} kW • ${b.unitProductionCost.toLocaleString('it-IT')} → Carica al banco
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          </section>
+
           {/* SEZIONE 5 (PUNTO 5): IMPATTO REALE DI FASCIA PREZZO (INVERTER IGBT -> SiC) E CLASSE D'USO */}
           <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-2">
@@ -1907,7 +2156,7 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
             <VolumeViewer3D
               engineInBayDimensionsMm={geometry.engineBayDimensionsMm}
               rawEngineDimensionsMm={geometry.engineBayDimensionsMm}
-              electricConfig={config}
+              electricConfig={effectiveConfig}
               engineType="ElectricHybrid"
               overlaidChassisBays={overlaidChassisBays}
             />
