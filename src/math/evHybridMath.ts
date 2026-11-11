@@ -1098,12 +1098,12 @@ export function calculateElectricHybridCosts(
   const systemSpec =
     HYBRID_SYSTEM_TYPES.find((s) => s.id === bench.systemType) ??
     HYBRID_SYSTEM_TYPES[0];
-  const coolingSpec =
+  const motorCoolingSpec =
     ELECTRIC_COOLING_SYSTEMS.find((c) => c.id === bench.motor.coolingSystem) ??
     ELECTRIC_COOLING_SYSTEMS[1];
 
-  // 1. Costo Pacco Batteria ($/kWh puro: LFP 75, NMC811 110, NCA 135, SolidState 190):
-  const batteryCost = batteryPack.cellsCost;
+  // 1. Costo Pacco Batteria (celle + BMS e gestione termica specifica del pacco):
+  const batteryCost = batteryPack.unitProductionCost;
 
   // 2. Costo Motori Elettrici (esattamente proporzionale al numero di motori: 1x, 2x, 3x, 4x;
   // zero dipendenza da posizionamento Anteriore/Posteriore o orientamento Trasversale/Longitudinale):
@@ -1117,11 +1117,14 @@ export function calculateElectricHybridCosts(
       disconnectAddonCost,
   );
 
-  // 3. Costo Inverter + Gestione Termica:
+  // 3. Costo Inverter + Gestione Termica dei Motori (dedicata ai soli motori elettrici):
+  const motorCoolingHardwareCost = Math.round(motorCoolingSpec.cost * 0.45);
+  const singleInverterCost = Math.max(
+    0,
+    unitMotor.inverterAndCoolingCost - motorCoolingHardwareCost,
+  );
   const inverterAndCoolingCost = Math.round(
-    (unitMotor.inverterAndCoolingCost - coolingSpec.cost * 0.45) *
-      (1 + (motorCount - 1) * 0.65) +
-      coolingSpec.cost,
+    singleInverterCost * (1 + (motorCount - 1) * 0.65) + motorCoolingHardwareCost,
   );
 
   // 4. Costo Motore Termico/Wankel Accoppiato (se Ibrido):
