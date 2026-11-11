@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
-  Battery,
+  ArrowRight,
   BatteryCharging,
   Box,
   CheckCircle2,
@@ -13,7 +13,6 @@ import {
   Save,
   ShieldAlert,
   Sliders,
-  Wind,
   Zap,
 } from 'lucide-react';
 import {
@@ -63,10 +62,12 @@ const REFERENCE_CLASSES: ReferenceClass[] = [
 
 /**
  * Converte un EngineEntity (Pistoni 1A o Wankel 1B) salvato nel database in un CoupledIceEngineOption
- * selezionabile per i sistemi Ibridi (MHEV, HEV, PHEV, EREV).
+ * selezionabile per i test dei sistemi ibridi (MHEV, HEV, PHEV, Range Extender).
  */
 function engineEntityToCoupledOption(eng: EngineEntity): CoupledIceEngineOption | null {
-  if (eng.propulsionType === 'ElectricHybrid_1C') return null;
+  if (eng.propulsionType === 'ElectricHybrid_1C') {
+    return null;
+  }
 
   if (eng.propulsionType === 'Wankel_1B' && eng.wankelSpecs) {
     const w = eng.wankelSpecs;
@@ -162,41 +163,45 @@ const EvHybridDynoCanvas2D: React.FC<EvHybridDynoCanvas2DProps> = ({
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
 
   const isParallelHybrid =
-    (systemType === 'MHEV' || systemType === 'FullHybrid' || systemType === 'PHEV') &&
-    Boolean(iceOnlyCurve && iceOnlyCurve.length > 0);
+    systemType === 'MHEV' || systemType === 'FullHybrid' || systemType === 'PHEV';
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || curve.length === 0) return;
-
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     const dpr = window.devicePixelRatio || 1;
-    const width = canvas.clientWidth || 580;
-    const height = canvas.clientHeight || 245;
-
+    const width = canvas.clientWidth;
+    const height = canvas.clientHeight;
     canvas.width = width * dpr;
     canvas.height = height * dpr;
     ctx.scale(dpr, dpr);
 
-    ctx.fillStyle = '#090d16';
+    ctx.fillStyle = '#030712';
     ctx.fillRect(0, 0, width, height);
 
-    const padLeft = 52;
-    const padRight = 24;
-    const padTop = 18;
-    const padBottom = 30;
+    if (!curve || curve.length === 0) return;
+
+    const padLeft = 46;
+    const padRight = 16;
+    const padTop = 20;
+    const padBottom = 26;
     const plotW = width - padLeft - padRight;
     const plotH = height - padTop - padBottom;
 
-    const minRpm = curve[0].rpm;
-    const maxRpm = Math.max(redlineRpm, curve[curve.length - 1].rpm);
-    const peakCurveVal = Math.max(...curve.map((p) => Math.max(p.torqueNm, p.powerHp)));
-    const maxVal = Math.max(200, Math.ceil((peakCurveVal * 1.12) / 50) * 50);
+    const minRpm = 0;
+    const maxRpm = Math.max(redlineRpm, curve[curve.length - 1]?.rpm ?? 18000);
+
+    let maxVal = 100;
+    curve.forEach((p) => {
+      if (p.torqueNm > maxVal) maxVal = p.torqueNm;
+      if (p.powerHp > maxVal) maxVal = p.powerHp;
+    });
+    maxVal = Math.ceil((maxVal * 1.1) / 50) * 50;
 
     // Griglia orizzontale
-    ctx.strokeStyle = 'rgba(148, 163, 184, 0.12)';
+    ctx.strokeStyle = '#1e293b';
     ctx.lineWidth = 1;
     const ySteps = 5;
     for (let i = 0; i <= ySteps; i++) {
@@ -309,7 +314,7 @@ const EvHybridDynoCanvas2D: React.FC<EvHybridDynoCanvas2DProps> = ({
       // 3. Curva Spinta Elettrica (tratteggiata verde smeraldo)
       ctx.setLineDash([3, 3]);
       ctx.strokeStyle = 'rgba(16, 185, 129, 0.65)';
-      ctx.lineWidth = 1.6;
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
       electricOnlyCurve.forEach((pt, idx) => {
         const x = toX(pt.rpm);
@@ -321,11 +326,35 @@ const EvHybridDynoCanvas2D: React.FC<EvHybridDynoCanvas2DProps> = ({
       ctx.restore();
     }
 
-    // Linea Redline (Limitatore)
+    // Curva Coppia Totale Sistema (Azzurro / Ciano solido brillante)
+    ctx.strokeStyle = '#38bdf8';
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    curve.forEach((p, idx) => {
+      const x = toX(p.rpm);
+      const y = toY(p.torqueNm);
+      if (idx === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    // Curva Potenza Totale Sistema (Ambra brillante)
+    ctx.strokeStyle = '#f59e0b';
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    curve.forEach((p, idx) => {
+      const x = toX(p.rpm);
+      const y = toY(p.powerHp);
+      if (idx === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    // Linea verticale limitatore RPM (Rosso tratteggiato)
     const redlineX = toX(redlineRpm);
     ctx.save();
-    ctx.setLineDash([4, 4]);
     ctx.strokeStyle = '#ef4444';
+    ctx.setLineDash([4, 4]);
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(redlineX, padTop);
@@ -333,82 +362,32 @@ const EvHybridDynoCanvas2D: React.FC<EvHybridDynoCanvas2DProps> = ({
     ctx.stroke();
     ctx.restore();
 
-    // Area sottesa Potenza Totale
-    ctx.save();
-    ctx.beginPath();
-    curve.forEach((pt, idx) => {
-      const x = toX(pt.rpm);
-      const y = toY(pt.powerHp);
-      if (idx === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-    ctx.lineTo(toX(curve[curve.length - 1].rpm), height - padBottom);
-    ctx.lineTo(toX(curve[0].rpm), height - padBottom);
-    ctx.closePath();
-    ctx.fillStyle = 'rgba(245, 158, 11, 0.09)';
-    ctx.fill();
-    ctx.restore();
-
-    // Curva Principale Coppia Totale (Nm) - Ciano pieno
-    ctx.strokeStyle = '#38bdf8';
-    ctx.lineWidth = 2.6;
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    curve.forEach((pt, idx) => {
-      const x = toX(pt.rpm);
-      const y = toY(pt.torqueNm);
-      if (idx === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-
-    // Curva Principale Potenza Totale (CV) - Ambra pieno
-    ctx.strokeStyle = '#f59e0b';
-    ctx.lineWidth = 2.6;
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    curve.forEach((pt, idx) => {
-      const x = toX(pt.rpm);
-      const y = toY(pt.powerHp);
-      if (idx === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-
-    // Crosshair interattivo
+    // Cursore ispezione RPM
     if (hoveredIndex !== null && curve[hoveredIndex]) {
-      const pt = curve[hoveredIndex];
-      const hx = toX(pt.rpm);
-      const hyTorque = toY(pt.torqueNm);
-      const hyPower = toY(pt.powerHp);
+      const hp = curve[hoveredIndex];
+      const hx = toX(hp.rpm);
+      const hyTorque = toY(hp.torqueNm);
+      const hyPower = toY(hp.powerHp);
 
       ctx.save();
-      ctx.strokeStyle = 'rgba(226, 232, 240, 0.5)';
+      ctx.strokeStyle = '#e2e8f0';
+      ctx.setLineDash([2, 2]);
       ctx.lineWidth = 1;
-      ctx.setLineDash([3, 3]);
       ctx.beginPath();
       ctx.moveTo(hx, padTop);
       ctx.lineTo(hx, height - padBottom);
       ctx.stroke();
+
+      ctx.fillStyle = '#38bdf8';
+      ctx.beginPath();
+      ctx.arc(hx, hyTorque, 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#f59e0b';
+      ctx.beginPath();
+      ctx.arc(hx, hyPower, 4, 0, Math.PI * 2);
+      ctx.fill();
       ctx.restore();
-
-      ctx.fillStyle = '#090d16';
-      ctx.strokeStyle = '#38bdf8';
-      ctx.lineWidth = 2.5;
-      ctx.beginPath();
-      ctx.arc(hx, hyTorque, 4.5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = '#090d16';
-      ctx.strokeStyle = '#f59e0b';
-      ctx.lineWidth = 2.5;
-      ctx.beginPath();
-      ctx.arc(hx, hyPower, 4.5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
     }
   }, [
     curve,
@@ -417,36 +396,33 @@ const EvHybridDynoCanvas2D: React.FC<EvHybridDynoCanvas2DProps> = ({
     redlineRpm,
     cornerSpeedRpm,
     systemType,
+    hoveredIndex,
     isParallelHybrid,
     erevGeneratorOutputKw,
-    hoveredIndex,
   ]);
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas || curve.length === 0) return;
-
     const rect = canvas.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
-    const padLeft = 52;
-    const padRight = 24;
-    const plotW = rect.width - padLeft - padRight;
-
-    const minRpm = curve[0].rpm;
-    const maxRpm = Math.max(redlineRpm, curve[curve.length - 1].rpm);
+    const padLeft = 46;
+    const padRight = 16;
+    const plotW = canvas.clientWidth - padLeft - padRight;
     const ratio = Math.max(0, Math.min(1, (mouseX - padLeft) / Math.max(1, plotW)));
+    const minRpm = 0;
+    const maxRpm = Math.max(redlineRpm, curve[curve.length - 1]?.rpm ?? 18000);
     const targetRpm = minRpm + ratio * (maxRpm - minRpm);
 
     let closestIdx = 0;
     let minDiff = Infinity;
-    curve.forEach((pt, idx) => {
-      const diff = Math.abs(pt.rpm - targetRpm);
+    curve.forEach((p, idx) => {
+      const diff = Math.abs(p.rpm - targetRpm);
       if (diff < minDiff) {
         minDiff = diff;
         closestIdx = idx;
       }
     });
-
     setHoveredIndex(closestIdx);
   };
 
@@ -459,7 +435,7 @@ const EvHybridDynoCanvas2D: React.FC<EvHybridDynoCanvas2DProps> = ({
 
   return (
     <div className="w-full rounded-lg border border-slate-800 bg-slate-950 overflow-hidden select-none">
-      {/* Header con Legenda separata */}
+      {/* Header con Legenda */}
       <div className="px-3.5 py-2 border-b border-slate-800/90 bg-slate-900/70 flex flex-wrap items-center justify-between gap-2 font-mono text-[11px]">
         <div className="flex items-center gap-2 min-w-0">
           <span className="px-1.5 py-0.5 rounded bg-sky-500/20 border border-sky-500/40 text-sky-300 font-bold shrink-0">
@@ -512,9 +488,8 @@ const EvHybridDynoCanvas2D: React.FC<EvHybridDynoCanvas2DProps> = ({
               </span>
             </div>
             {isParallelHybrid && activeIcePoint && activeEvPoint ? (
-              <div className="text-emerald-300 font-semibold">
-                ICE: {activeIcePoint.powerHp} CV / {activeIcePoint.torqueNm} Nm • EV: +
-                {activeEvPoint.powerHp} CV / +{activeEvPoint.torqueNm} Nm
+              <div className="text-[10px] text-emerald-300">
+                ICE: {activeIcePoint.powerHp} CV • EV: +{activeEvPoint.powerHp} CV
               </div>
             ) : (
               <div className="text-slate-400">
@@ -561,6 +536,12 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
     saveBatteryPackToLibrary,
   } = useGameStore();
 
+  // Organizzazione Interfaccia in 3 Pannelli Distinti (Punto 5):
+  // 1) 'motor' -> Costruttore Singolo Motore Elettrico (1.0x universale, senza asse o orientamento)
+  // 2) 'battery' -> Costruttore Pacco Batteria Indipendente
+  // 3) 'bench' -> Simulatore Powertrain al Banco Prova (scala multi-motore 1-4x, albero AWD -8% e test ibridi)
+  const [activeSubPanel, setActiveSubPanel] = useState<'motor' | 'battery' | 'bench'>('motor');
+
   // Stato configurazione Powertrain Elettrico/Ibrido (Fase 1.4)
   const [config, setConfig] = useState<ElectricHybridEngineConfigInput>({
     systemType: 'PureEV',
@@ -598,11 +579,7 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
     chassisList.slice(0, 3).map((c) => c.id),
   );
 
-  // Costruisce l'elenco completo di tutti i Motori Termici / Wankel selezionabili per i test Ibridi (Punto 6):
-  // 1) Motore a Pistoni attualmente configurato nella Tab 1A
-  // 2) Motore Wankel attualmente configurato nella Tab 1B
-  // 3) Qualsiasi motore termico/Wankel salvato nel database dall'utente
-  // 4) 3 Motori di riferimento base
+  // Motori Termici / Wankel selezionabili per accoppiamento Ibrido
   const availableCoupledIceEngines: CoupledIceEngineOption[] = useMemo(() => {
     const savedOptions = engines
       .map(engineEntityToCoupledOption)
@@ -623,8 +600,7 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
     );
   }, [availableCoupledIceEngines, config.coupledIceOptionId, livePistonDraft]);
 
-  // Se è stato caricato un Pacco Batteria salvato (BatteryPackSpec indipendente), mantiene la sua
-  // tensione/raffreddamento/fascia/classe separati dal motore, sincronizzando solo chimica e kWh dagli slider.
+  // Se è stato caricato un Pacco Batteria salvato, mantiene le sue specifiche
   const effectiveConfig: ElectricHybridEngineConfigInput = useMemo(
     () =>
       config.batterySpec
@@ -640,7 +616,7 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
     [config],
   );
 
-  // Calcoli Matematici e Telemetrici Real-Time (da src/math/evHybridMath.ts)
+  // Calcoli Matematici e Telemetrici Real-Time
   const geometry = useMemo(
     () => calculateElectricHybridGeometryAndDimensions(effectiveConfig, selectedCoupledIce),
     [effectiveConfig, selectedCoupledIce],
@@ -775,13 +751,6 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
     [config.priceTier],
   );
 
-  const classSpec = useMemo(
-    () =>
-      REFERENCE_CLASS_EV_SPECS[config.referenceClass] ??
-      REFERENCE_CLASS_EV_SPECS.Normale,
-    [config.referenceClass],
-  );
-
   // Verifica compatibilità vano motore
   const chassisCompatibilityList = useMemo(() => {
     return chassisList.map((chassis) => {
@@ -826,7 +795,7 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
     }));
   };
 
-  // Preset rapidi di dimensionamento statore/rotore per test immediati (Citycar -> Hypercar)
+  // Preset rapidi di dimensionamento statore/rotore
   const applyQuickSizingPreset = (preset: 'citycar' | 'sedan' | 'performance' | 'hypercar') => {
     if (preset === 'citycar') {
       setConfig((prev) => ({
@@ -838,7 +807,7 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
         voltageArchitecture: 400,
         batteryChemistry: 'LFP',
         batteryCapacityKwh: prev.systemType === 'PureEV' ? 40 : prev.batteryCapacityKwh,
-        coolingSystem: 'LiquidGlycol',
+        coolingSystem: 'Air',
         priceTier: 'Economica',
         referenceClass: 'Normale',
       }));
@@ -849,18 +818,19 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
         motorLayout: 'SingleMotor_RWD',
         statorDiameterMm: 225,
         rotorLengthMm: 155,
-        voltageArchitecture: 400,
+        voltageArchitecture: 800,
         batteryChemistry: 'NMC811',
         batteryCapacityKwh: prev.systemType === 'PureEV' ? 75 : prev.batteryCapacityKwh,
         coolingSystem: 'LiquidGlycol',
         priceTier: 'Media',
-        referenceClass: 'Normale',
+        referenceClass: 'Comfort',
       }));
     } else if (preset === 'performance') {
       setConfig((prev) => ({
         ...prev,
         electricMotorType: 'IPM_SynRM',
         motorLayout: 'DualMotor_eAWD',
+        hasFrontDisconnect: true,
         statorDiameterMm: 265,
         rotorLengthMm: 195,
         voltageArchitecture: 800,
@@ -875,6 +845,7 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
         ...prev,
         electricMotorType: 'AxialFlux',
         motorLayout: 'QuadMotor_Independent',
+        hasFrontDisconnect: false,
         statorDiameterMm: 315,
         rotorLengthMm: 245,
         voltageArchitecture: 1000,
@@ -941,6 +912,10 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
     }
   };
 
+  const isAsm = config.electricMotorType === 'InductionAsync';
+  const showDisconnectControl =
+    config.motorLayout === 'DualMotor_eAWD' || config.motorLayout === 'TriMotor_TorqueVectoring';
+
   return (
     <div className="space-y-6">
       {/* Selettore Sotto-Moduli Fase 1 (1A / 1B / 1C Attivo) */}
@@ -966,7 +941,7 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
 
           <div className="px-4 py-2 rounded-lg bg-sky-500 text-slate-950 font-bold text-xs font-mono uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-sky-500/10">
             <Zap className="w-4 h-4" />
-            <span>1C — Elettrici & Ibridi (Fisica Reale Field Weakening)</span>
+            <span>1C — Elettrici & Ibridi (Fisica Reale)</span>
           </div>
         </div>
 
@@ -1019,993 +994,1411 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
         </div>
       )}
 
+      {/* SELETTORE DEI 3 PANNELLI DISTINTI (Punto 5) */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 border-b border-slate-800 pb-4">
+        <button
+          type="button"
+          onClick={() => setActiveSubPanel('motor')}
+          className={`flex items-center justify-between p-3 rounded-xl font-mono text-xs font-bold transition cursor-pointer border ${
+            activeSubPanel === 'motor'
+              ? 'bg-sky-950/80 border-sky-500 text-sky-100 shadow-lg shadow-sky-500/10'
+              : 'bg-slate-900/60 border-slate-800 text-slate-300 hover:border-slate-700'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <Cpu className={`w-4 h-4 ${activeSubPanel === 'motor' ? 'text-sky-400' : 'text-slate-400'}`} />
+            <div className="text-left">
+              <div>Pannello 1: Costruttore Motore</div>
+              <div className="text-[10px] font-normal text-slate-400">Singola unità universale (1.0×)</div>
+            </div>
+          </div>
+          <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-sky-300 shrink-0">
+            {unitMotor.peakPowerHp} CV • {unitMotor.dryWeightKg} kg
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSubPanel('battery')}
+          className={`flex items-center justify-between p-3 rounded-xl font-mono text-xs font-bold transition cursor-pointer border ${
+            activeSubPanel === 'battery'
+              ? 'bg-emerald-950/80 border-emerald-500 text-emerald-100 shadow-lg shadow-emerald-500/10'
+              : 'bg-slate-900/60 border-slate-800 text-slate-300 hover:border-slate-700'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <BatteryCharging className={`w-4 h-4 ${activeSubPanel === 'battery' ? 'text-emerald-400' : 'text-slate-400'}`} />
+            <div className="text-left">
+              <div>Pannello 2: Costruttore Batteria</div>
+              <div className="text-[10px] font-normal text-slate-400">Pacco indipendente salvabile</div>
+            </div>
+          </div>
+          <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-emerald-300 shrink-0">
+            {batteryPack.usableCapacityKwh} kWh • {batteryPack.maxDischargePowerKw} kW
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSubPanel('bench')}
+          className={`flex items-center justify-between p-3 rounded-xl font-mono text-xs font-bold transition cursor-pointer border ${
+            activeSubPanel === 'bench'
+              ? 'bg-amber-950/80 border-amber-500 text-amber-100 shadow-lg shadow-amber-500/10'
+              : 'bg-slate-900/60 border-slate-800 text-slate-300 hover:border-slate-700'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <Gauge className={`w-4 h-4 ${activeSubPanel === 'bench' ? 'text-amber-400' : 'text-slate-400'}`} />
+            <div className="text-left">
+              <div>Pannello 3: Simulatore al Banco</div>
+              <div className="text-[10px] font-normal text-slate-400">Test multi-motore & ibridi</div>
+            </div>
+          </div>
+          <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-amber-300 shrink-0">
+            {telemetry.peakPowerHp} CV • {telemetry.specs.systemType}
+          </span>
+        </button>
+      </div>
+
       {/* Layout Principale a Due Colonne */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* ================================================================= */}
-        {/* COLONNA SINISTRA: CONFIGURATORE ELETTRO-MECCANICO (7 Colonne)    */}
+        {/* COLONNA SINISTRA: PANNELLO ATTIVO (7 Colonne)                     */}
         {/* ================================================================= */}
         <div className="lg:col-span-7 space-y-6">
-          {/* SEZIONE 1: TIPOLOGIA POWERTRAIN E PRESET RAPIDI */}
-          <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
-              <div className="flex items-center gap-2">
-                <Zap className="w-4 h-4 text-sky-400" />
-                <h2 className="text-xs font-bold font-mono uppercase tracking-wider text-slate-200">
-                  1. Architettura Powertrain (BEV / MHEV / HEV / PHEV / EREV)
-                </h2>
-              </div>
-              <div className="flex items-center gap-1.5 font-mono text-[10px]">
-                <span className="text-slate-400">Preset Rapidi:</span>
-                <button
-                  type="button"
-                  onClick={() => applyQuickSizingPreset('citycar')}
-                  className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer"
-                >
-                  Citycar (60-90 CV)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => applyQuickSizingPreset('sedan')}
-                  className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-sky-300 cursor-pointer"
-                >
-                  Berlina RWD (200 CV)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => applyQuickSizingPreset('performance')}
-                  className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-amber-300 cursor-pointer"
-                >
-                  Dual AWD (650 CV)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => applyQuickSizingPreset('hypercar')}
-                  className="px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/50 text-amber-300 font-bold cursor-pointer"
-                >
-                  Quad Axial (2.100+ CV)
-                </button>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-              {HYBRID_SYSTEM_TYPES.map((sys) => {
-                const isSelected = config.systemType === sys.id;
-                return (
-                  <button
-                    key={sys.id}
-                    type="button"
-                    onClick={() => handleSystemTypeChange(sys.id)}
-                    className={`p-3 rounded-lg border text-left transition cursor-pointer flex flex-col justify-between ${
-                      isSelected
-                        ? 'bg-sky-950/60 border-sky-500 shadow-md shadow-sky-500/10'
-                        : 'bg-slate-950 border-slate-800 hover:border-slate-700'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="font-bold text-xs text-slate-100">{sys.name}</div>
-                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-sky-300 shrink-0">
-                        {sys.badge}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
-                      {sys.description}
-                    </p>
-                    <div className="mt-2.5 flex items-center justify-between text-[10px] font-mono border-t border-slate-800/80 pt-1.5 text-slate-400">
-                      <span>Taglio CO2: -{sys.emissionsReductionPercent}%</span>
-                      <span className="text-emerald-400 font-semibold">
-                        {sys.minBatteryKwh}–{sys.maxBatteryKwh} kWh
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-
-          {/* SEZIONE 2 (PUNTO 6): SELETTORE MOTORE TERMICO / WANKEL ACCOPPIATO PER TEST IBRIDI */}
-          {systemSpec.hasIceEngine && (
-            <section className="rounded-xl border-2 border-amber-500/60 bg-amber-950/20 p-4 space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-800/60 pb-2.5">
+          {/* =============================================================== */}
+          {/* PANNELLO 1: COSTRUTTORE SINGOLO MOTORE ELETTRICO (1.0x)         */}
+          {/* =============================================================== */}
+          {activeSubPanel === 'motor' && (
+            <div className="space-y-6">
+              {/* Banner descrittivo Pannello 1 */}
+              <div className="p-4 rounded-xl border border-sky-500/40 bg-sky-950/20 space-y-1">
                 <div className="flex items-center gap-2">
-                  <Flame className="w-4 h-4 text-amber-400" />
-                  <h2 className="text-xs font-bold font-mono uppercase tracking-wider text-amber-200">
-                    Motore Termico / Wankel Accoppiato ({systemSpec.badge})
+                  <Cpu className="w-4 h-4 text-sky-400" />
+                  <h2 className="text-xs font-bold font-mono uppercase tracking-wider text-sky-200">
+                    Pannello 1: Costruttore Singolo Motore Elettrico (Unità Universale 1.0×)
                   </h2>
                 </div>
-                <span className="text-[11px] font-mono text-amber-300 font-semibold">
-                  {config.systemType === 'RangeExtender'
-                    ? 'Lavora a Regime Fisso come Generatore Elettrico'
-                    : 'Sovrapposizione Reale delle Curve sul Banco Prova'}
-                </span>
+                <p className="text-[11px] text-slate-300 leading-relaxed">
+                  Configura e omologa la singola unità motrice indipendente. Rimosso qualsiasi parametro di posizionamento (Anteriore/Posteriore) o orientamento (Trasversale/Longitudinale): l’unità è universale e riutilizzabile su qualsiasi asse al banco prova.
+                </p>
               </div>
 
-              <div className="space-y-2">
-                <label className="text-[11px] font-mono text-amber-200/90 uppercase tracking-wider block">
-                  Scegli il Motore Endotermico (Pistoni Tab 1A, Wankel Tab 1B, Salvati o Riferimento):
-                </label>
+              {/* 1. Tipologia Macchina Elettrica (Punto 1) */}
+              <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <span className="text-xs font-bold font-mono uppercase tracking-wider text-slate-200">
+                    1. Tipologia Macchina Elettrica
+                  </span>
+                  <span className="text-[11px] font-mono text-sky-400 font-semibold">
+                    Field Weakening @ {unitMotor.cornerSpeedRpm} RPM
+                  </span>
+                </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {availableCoupledIceEngines.map((iceOpt) => {
-                    const isSelected = selectedCoupledIce.id === iceOpt.id;
-                    const badgeLabel =
-                      iceOpt.sourceKind === 'LivePiston1A'
-                        ? '🔥 TAB 1A LIVE'
-                        : iceOpt.sourceKind === 'LiveWankel1B'
-                          ? '🌀 TAB 1B LIVE'
-                          : iceOpt.sourceKind === 'SavedDatabase'
-                            ? '📦 SALVATO DB'
-                            : '⚙️ RIFERIMENTO';
-                    const badgeClass =
-                      iceOpt.sourceKind === 'LivePiston1A' ||
-                      iceOpt.sourceKind === 'LiveWankel1B'
-                        ? 'bg-amber-500 text-slate-950 font-bold'
-                        : iceOpt.sourceKind === 'SavedDatabase'
-                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                          : 'bg-slate-800 text-slate-300';
-
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {ELECTRIC_MOTOR_TYPES.map((mot) => {
+                    const isSelected = config.electricMotorType === mot.id;
                     return (
                       <button
-                        key={iceOpt.id}
+                        key={mot.id}
                         type="button"
                         onClick={() =>
                           setConfig((prev) => ({
                             ...prev,
-                            coupledIceOptionId: iceOpt.id,
+                            electricMotorType: mot.id,
+                            maxMotorRpm: Math.min(prev.maxMotorRpm, mot.maxSafeRpm),
                           }))
                         }
-                        className={`p-2.5 rounded-lg border text-left transition cursor-pointer flex flex-col justify-between ${
+                        className={`p-3 rounded-lg border text-left transition cursor-pointer flex flex-col justify-between ${
                           isSelected
-                            ? 'bg-amber-950/70 border-amber-400 shadow-md shadow-amber-500/10'
-                            : 'bg-slate-950/90 border-slate-800 hover:border-slate-700'
+                            ? 'bg-sky-950/60 border-sky-500 text-sky-100 shadow-sm'
+                            : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
                         }`}
                       >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="font-bold text-xs text-slate-100 leading-snug">
-                            {iceOpt.name}
+                        <div className="flex justify-between items-start gap-2">
+                          <span className="text-xs font-bold">{mot.name}</span>
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-emerald-300 shrink-0">
+                            Eff. {mot.baseEfficiencyPercent}%
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-1.5 leading-relaxed">
+                          {mot.description}
+                        </p>
+                        <div className="mt-2 pt-1.5 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-mono text-amber-300">
+                          <span>
+                            Potenza ×{mot.powerMultiplier.toFixed(2)} • Coppia ×{mot.torqueMultiplier.toFixed(2)}
+                          </span>
+                          <span>Peso ×{mot.weightMultiplier.toFixed(2)}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+
+              {/* 2. Dimensionamento Statore e Rotore (Punto 2: nessun clamp max peso) */}
+              <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <span className="text-xs font-bold font-mono uppercase tracking-wider text-slate-200">
+                    2. Dimensionamento Statore, Rotore & Regime Massimo
+                  </span>
+                  <span className="text-[10px] font-mono text-emerald-400">
+                    Volume Cilindrico: {Math.round(Math.PI * Math.pow(config.statorDiameterMm / 20, 2) * (config.rotorLengthMm / 10))} cc
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-2">
+                    <div className="flex justify-between items-center text-xs font-mono">
+                      <span className="text-slate-300 font-semibold">Diametro Statore:</span>
+                      <span className="text-amber-400 font-bold">{config.statorDiameterMm} mm</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={150}
+                      max={340}
+                      step={5}
+                      value={config.statorDiameterMm}
+                      onChange={(e) =>
+                        setConfig((prev) => ({
+                          ...prev,
+                          statorDiameterMm: Number(e.target.value),
+                        }))
+                      }
+                      className="w-full accent-amber-500 cursor-pointer"
+                    />
+                    <div className="flex justify-between text-[10px] font-mono text-slate-500">
+                      <span>150 mm (Citycar)</span>
+                      <span>340 mm (Hypercar)</span>
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-2">
+                    <div className="flex justify-between items-center text-xs font-mono">
+                      <span className="text-slate-300 font-semibold">Lunghezza Rotore:</span>
+                      <span className="text-amber-400 font-bold">{config.rotorLengthMm} mm</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={80}
+                      max={280}
+                      step={5}
+                      value={config.rotorLengthMm}
+                      onChange={(e) =>
+                        setConfig((prev) => ({
+                          ...prev,
+                          rotorLengthMm: Number(e.target.value),
+                        }))
+                      }
+                      className="w-full accent-amber-500 cursor-pointer"
+                    />
+                    <div className="flex justify-between text-[10px] font-mono text-slate-500">
+                      <span>80 mm (Compatto)</span>
+                      <span>280 mm (Max Flusso)</span>
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-2">
+                    <div className="flex justify-between items-center text-xs font-mono">
+                      <span className="text-slate-300 font-semibold">Limitatore E-Motor:</span>
+                      <span className="text-sky-400 font-bold">{config.maxMotorRpm} RPM</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={14000}
+                      max={motorSpec.maxSafeRpm}
+                      step={500}
+                      value={Math.min(config.maxMotorRpm, motorSpec.maxSafeRpm)}
+                      onChange={(e) =>
+                        setConfig((prev) => ({
+                          ...prev,
+                          maxMotorRpm: Number(e.target.value),
+                        }))
+                      }
+                      className="w-full accent-sky-500 cursor-pointer"
+                    />
+                    <div className="flex justify-between text-[10px] font-mono text-slate-500">
+                      <span>14.000 RPM</span>
+                      <span>{motorSpec.maxSafeRpm} RPM Max</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-2.5 rounded bg-slate-950/80 border border-slate-800/80 text-[11px] font-mono flex items-center justify-between text-slate-400">
+                  <span>
+                    Cassa esterna: Ø {config.statorDiameterMm + 38} mm • Lunghezza{' '}
+                    {config.electricMotorType === 'AxialFlux'
+                      ? Math.round(85 + config.rotorLengthMm * 0.22)
+                      : config.rotorLengthMm + 80}{' '}
+                    mm
+                  </span>
+                  <span className="text-emerald-400 font-semibold">
+                    ✓ Peso unitario: {unitMotor.dryWeightKg} kg a secco (scala continua proporzionale al volume senza tetto)
+                  </span>
+                </div>
+              </section>
+
+              {/* 3. Tensione e Raffreddamento Singolo Motore (Punto 3: fluidi reali +1.2 kg o +2.5..4.0 kg) */}
+              <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-mono text-slate-300 uppercase tracking-wider block">
+                    3. Tensione Operativa Motore
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 font-mono text-xs">
+                    {VOLTAGE_ARCHITECTURES.map((vSpec) => {
+                      const isSelected = config.voltageArchitecture === vSpec.voltage;
+                      return (
+                        <button
+                          key={vSpec.voltage}
+                          type="button"
+                          onClick={() =>
+                            setConfig((prev) => ({
+                              ...prev,
+                              voltageArchitecture: vSpec.voltage,
+                            }))
+                          }
+                          className={`p-2.5 rounded-lg border text-left cursor-pointer transition flex flex-col justify-between ${
+                            isSelected
+                              ? 'bg-amber-950/60 border-amber-500 text-amber-100'
+                              : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+                          }`}
+                        >
+                          <div className="font-bold flex items-center justify-between">
+                            <span>{vSpec.name}</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-amber-300">
+                              ×{vSpec.powerMultiplier.toFixed(2)} CV
+                            </span>
                           </div>
-                          <span
-                            className={`text-[9px] font-mono px-1.5 py-0.5 rounded shrink-0 ${badgeClass}`}
-                          >
-                            {badgeLabel}
+                          <div className="text-[10px] text-slate-400 mt-1">{vSpec.description}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-mono text-slate-300 uppercase tracking-wider flex items-center justify-between">
+                    <span>Sistema di Raffreddamento Motore</span>
+                    <span className="text-emerald-400 font-normal">
+                      Fluidi Motore: +{(unitMotor.wetWeightKg - unitMotor.dryWeightKg).toFixed(1)} kg ({config.coolingSystem === 'Air' ? 'olio riduttore 1.2 kg' : 'olio riduttore + liquido camicia statore'})
+                    </span>
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    {ELECTRIC_COOLING_SYSTEMS.map((cool) => {
+                      const isSelected = config.coolingSystem === cool.id;
+                      const fluidOffsetLabel = cool.id === 'Air' ? '+1.2 kg fluidi' : '+2.5 ~ 4.0 kg fluidi';
+                      return (
+                        <button
+                          key={cool.id}
+                          type="button"
+                          onClick={() => setConfig((prev) => ({ ...prev, coolingSystem: cool.id }))}
+                          className={`p-2.5 rounded-lg border text-left transition cursor-pointer flex flex-col justify-between ${
+                            isSelected
+                              ? 'bg-sky-950/60 border-sky-500 text-sky-100'
+                              : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+                          }`}
+                        >
+                          <div className="font-bold text-xs">{cool.name}</div>
+                          <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
+                            {cool.description}
+                          </p>
+                          <div className="mt-2 pt-1 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-mono">
+                            <span className="text-amber-300 font-semibold">{fluidOffsetLabel}</span>
+                            <span className="text-slate-400">${cool.cost}</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </section>
+
+              {/* 4. Inverter & Fascia Prezzo / Classe */}
+              <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-mono text-slate-300 uppercase tracking-wider block">
+                    4. Elettronica Inverter (Fascia di Prezzo)
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {PRICE_TIERS.map((tier) => {
+                      const tSpec = PRICE_TIER_EV_SPECS[tier];
+                      const isSelected = config.priceTier === tier;
+                      return (
+                        <button
+                          key={tier}
+                          type="button"
+                          onClick={() =>
+                            setConfig((prev) => ({
+                              ...prev,
+                              priceTier: tier,
+                              inverterTech: tSpec.mappedInverterTech,
+                            }))
+                          }
+                          className={`p-2.5 rounded-lg border text-left transition cursor-pointer flex flex-col justify-between ${
+                            isSelected
+                              ? 'bg-amber-950/60 border-amber-500 text-amber-100'
+                              : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-bold text-xs">Fascia {tier}</span>
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-sky-300">
+                              {tSpec.inverterShort}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-400 mt-1">{tSpec.description}</p>
+                          <div className="mt-2 pt-1 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-mono text-emerald-300">
+                            <span>Potenza ×{tSpec.powerMultiplier.toFixed(2)}</span>
+                            <span>Efficienza {tSpec.inverterEfficiencyPercent}%</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-mono text-slate-300 uppercase tracking-wider block">
+                    Classe d’Uso Motore (Taratura Erogazione)
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                    {REFERENCE_CLASSES.map((refCls) => {
+                      const cSpec = REFERENCE_CLASS_EV_SPECS[refCls];
+                      const isSelected = config.referenceClass === refCls;
+                      return (
+                        <button
+                          key={refCls}
+                          type="button"
+                          onClick={() =>
+                            setConfig((prev) => ({
+                              ...prev,
+                              referenceClass: refCls,
+                            }))
+                          }
+                          className={`p-2.5 rounded-lg border text-left transition cursor-pointer flex flex-col justify-between ${
+                            isSelected
+                              ? 'bg-sky-950/60 border-sky-500 text-sky-100'
+                              : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="font-bold text-xs">Classe {refCls}</span>
+                            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-amber-300">
+                              CV ×{cSpec.powerMultiplier.toFixed(2)}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
+                            {cSpec.description}
+                          </p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </section>
+
+              {/* 5. Salvataggio Singola Unità nella Libreria Componenti */}
+              <section className="rounded-xl border border-sky-500/50 bg-sky-950/10 p-4 space-y-4">
+                <div className="flex items-center justify-between border-b border-sky-800/60 pb-2">
+                  <div className="flex items-center gap-2">
+                    <Save className="w-4 h-4 text-sky-400" />
+                    <h3 className="text-xs font-bold font-mono uppercase tracking-wider text-sky-200">
+                      5. Salvataggio Singola Unità Motore nella Libreria
+                    </h3>
+                  </div>
+                  <span className="text-[11px] font-mono text-sky-300 font-semibold">
+                    {unitMotor.peakPowerHp} CV • {unitMotor.peakTorqueNm} Nm • ${unitMotor.unitProductionCost.toLocaleString('it-IT')}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-mono">
+                  <div className="space-y-1">
+                    <label className="text-slate-400">Nome Commerciale Motore:</label>
+                    <input
+                      type="text"
+                      value={motorLibName}
+                      onChange={(e) => setMotorLibName(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded bg-slate-900 border border-slate-800 text-slate-100"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-slate-400">Codice Identificativo:</label>
+                    <input
+                      type="text"
+                      value={motorLibCode}
+                      onChange={(e) => setMotorLibCode(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded bg-slate-900 border border-slate-800 text-slate-100"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-3 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleSaveMotor}
+                    className="px-4 py-2 rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold font-mono text-xs flex items-center gap-2 cursor-pointer transition shadow-md shadow-sky-500/10"
+                  >
+                    <Save className="w-4 h-4" />
+                    <span>Salva Motore Singolo (${unitMotor.developmentCost.capitalCost.toLocaleString('it-IT')} • {unitMotor.developmentCost.rdCost} R&D)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveSubPanel('bench')}
+                    className="px-3.5 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 border border-sky-500/50 text-sky-300 font-mono text-xs flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <span>Invia al Banco Prova</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                {/* Motori salvati nella libreria */}
+                <div className="pt-2 border-t border-slate-800/80 space-y-2 font-mono text-[11px]">
+                  <div className="text-[10px] text-slate-400 uppercase tracking-wider">
+                    Motori Elettrici Salvati nella Libreria ({savedElectricMotors.length}):
+                  </div>
+                  {savedElectricMotors.length === 0 ? (
+                    <div className="text-slate-500 text-[10px]">
+                      Nessun motore ancora salvato. Salva questa unità per renderla disponibile in tutti i progetti.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {savedElectricMotors.map((m) => (
+                        <div
+                          key={m.id}
+                          className="p-2.5 rounded-lg border border-slate-800 bg-slate-950 flex flex-col justify-between gap-1.5"
+                        >
+                          <div>
+                            <div className="font-bold text-slate-200">{m.name} ({m.codeName})</div>
+                            <div className="text-[10px] text-sky-300">
+                              {m.peakPowerHp} CV • {m.peakTorqueNm} Nm • {m.dryWeightKg} kg • ${m.unitProductionCost.toLocaleString('it-IT')}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 pt-1 border-t border-slate-800/60">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                loadMotorToBench(m);
+                                setActiveSubPanel('bench');
+                              }}
+                              className="flex-1 px-2 py-1 rounded bg-sky-500/20 hover:bg-sky-500/30 text-sky-200 text-[10px] font-bold text-center cursor-pointer"
+                            >
+                              Monta al Banco Prova →
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => loadMotorToBench(m)}
+                              className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] cursor-pointer"
+                            >
+                              Modifica
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </section>
+            </div>
+          )}
+
+          {/* =============================================================== */}
+          {/* PANNELLO 2: COSTRUTTORE PACCO BATTERIA INDIPENDENTE             */}
+          {/* =============================================================== */}
+          {activeSubPanel === 'battery' && (
+            <div className="space-y-6">
+              {/* Banner descrittivo Pannello 2 */}
+              <div className="p-4 rounded-xl border border-emerald-500/40 bg-emerald-950/20 space-y-1">
+                <div className="flex items-center gap-2">
+                  <BatteryCharging className="w-4 h-4 text-emerald-400" />
+                  <h2 className="text-xs font-bold font-mono uppercase tracking-wider text-emerald-200">
+                    Pannello 2: Costruttore Pacco Batteria Indipendente
+                  </h2>
+                </div>
+                <p className="text-[11px] text-slate-300 leading-relaxed">
+                  Configura e dimensiona indipendentemente il pacco accumulatori. Gestisce chimica celle, $/kWh reali, scarica massima di picco e continua, durata cicli SoH e ingombro 3D, pronto per essere salvato e accoppiato al banco prova.
+                </p>
+              </div>
+
+              {/* 1. Chimica Cella ($/kWh Reali) */}
+              <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <span className="text-xs font-bold font-mono uppercase tracking-wider text-slate-200">
+                    1. Chimica Cella Pacco Batteria ($/kWh Reali)
+                  </span>
+                  <span className="text-[11px] font-mono text-emerald-400 font-bold">
+                    Costo Celle: ${batteryPack.cellsCost.toLocaleString('it-IT')} ({batterySpec.costPerKwh} $/kWh)
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {BATTERY_CHEMISTRIES.map((bat) => {
+                    const isSelected = config.batteryChemistry === bat.id;
+                    const packCostPreview = Math.round(config.batteryCapacityKwh * bat.costPerKwh);
+                    return (
+                      <button
+                        key={bat.id}
+                        type="button"
+                        onClick={() => setConfig((prev) => ({ ...prev, batteryChemistry: bat.id }))}
+                        className={`p-3 rounded-lg border text-left transition cursor-pointer flex flex-col justify-between ${
+                          isSelected
+                            ? 'bg-emerald-950/60 border-emerald-500 text-emerald-100 shadow-sm'
+                            : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex justify-between items-start gap-2">
+                          <span className="text-xs font-bold">{bat.name}</span>
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold shrink-0">
+                            {bat.costPerKwh} $/kWh
                           </span>
                         </div>
-                        <div className="text-[10px] font-mono text-slate-400 mt-1">
-                          {iceOpt.architectureLabel} • Limitatore {iceOpt.redlineRpm} RPM
-                        </div>
-                        <div className="mt-2 flex items-center justify-between text-[10px] font-mono border-t border-slate-800/80 pt-1.5">
+                        <p className="text-[10px] text-slate-400 mt-1.5 leading-relaxed">
+                          {bat.description}
+                        </p>
+                        <div className="mt-2 pt-1.5 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-mono">
+                          <span className="text-sky-300">
+                            {bat.cellDensityWhPerKg} Wh/kg • {(bat.baseLifespanKm / 1000).toFixed(0)}k km
+                          </span>
                           <span className="text-amber-300 font-bold">
-                            {iceOpt.peakPowerHp} CV / {iceOpt.peakTorqueNm} Nm
-                          </span>
-                          <span className="text-slate-400">
-                            {iceOpt.wetWeightKg} kg • ${iceOpt.unitProductionCost.toLocaleString('it-IT')}
+                            Celle: ${packCostPreview.toLocaleString('it-IT')}
                           </span>
                         </div>
                       </button>
                     );
                   })}
                 </div>
-              </div>
+              </section>
 
-              {/* Scheda Sinergia Ibrida o Bilancio Generatore Range Extender */}
-              {config.systemType === 'RangeExtender' ? (
-                <div
-                  className={`p-3 rounded-lg border font-mono text-xs space-y-1.5 ${
-                    telemetry.specs.erevSelfSustaining
-                      ? 'bg-emerald-950/50 border-emerald-500/60 text-emerald-200'
-                      : 'bg-red-950/50 border-red-500/60 text-red-200'
-                  }`}
-                >
-                  <div className="flex items-center justify-between font-bold">
-                    <span>
-                      {telemetry.specs.erevSelfSustaining
-                        ? '✓ GENERATORE EREV AUTOSUFFICIENTE IN AUTOSTRADA'
-                        : '⚠️ GENERATORE SOTTODIMENSIONATO (RISCHIO TURTLE MODE)'}
+              {/* 2. Capacità Energetica Totale Pacco (kWh) */}
+              <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <span className="text-xs font-bold font-mono uppercase tracking-wider text-slate-200">
+                    2. Capacità Energetica Totale Pacco (kWh)
+                  </span>
+                  <div className="flex items-center gap-1.5 font-mono text-[10px]">
+                    <span className="text-slate-400">Preset Rapidi:</span>
+                    <button
+                      type="button"
+                      onClick={() => setConfig((prev) => ({ ...prev, batteryCapacityKwh: 3 }))}
+                      className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer"
+                    >
+                      MHEV (3 kWh)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfig((prev) => ({ ...prev, batteryCapacityKwh: 22 }))}
+                      className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-emerald-300 cursor-pointer"
+                    >
+                      PHEV (22 kWh)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfig((prev) => ({ ...prev, batteryCapacityKwh: 40 }))}
+                      className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-sky-300 cursor-pointer"
+                    >
+                      Citycar (40 kWh)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfig((prev) => ({ ...prev, batteryCapacityKwh: 75 }))}
+                      className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-amber-300 cursor-pointer"
+                    >
+                      Berlina (75 kWh)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfig((prev) => ({ ...prev, batteryCapacityKwh: 115 }))}
+                      className="px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold cursor-pointer"
+                    >
+                      Hypercar (115 kWh)
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-2">
+                  <div className="flex flex-wrap justify-between items-center gap-2 text-xs font-mono">
+                    <span className="text-slate-300 font-semibold">Capacità Pacco Batteria:</span>
+                    <span className="text-emerald-400 font-bold">
+                      {config.batteryCapacityKwh} kWh nominali • {batteryPack.usableCapacityKwh} kWh utili
                     </span>
-                    <span>Regime Fisso: {telemetry.specs.erevGeneratorRpm} RPM</span>
                   </div>
-                  <div className="text-[11px] opacity-90">
-                    Il motore <strong>{selectedCoupledIce.name}</strong> genera{' '}
-                    <strong>{telemetry.specs.erevGeneratorOutputKw} kW continui</strong> contro un
-                    fabbisogno medio in crociera di{' '}
-                    <strong>{telemetry.specs.erevCruisingDemandKw} kW</strong>. Autonomia totale
-                    combinata (Batteria + Serbatoio):{' '}
-                    <strong>{telemetry.specs.erevTotalCombinedRangeKm} km</strong>.
+                  <input
+                    type="range"
+                    min={1}
+                    max={150}
+                    step={config.batteryCapacityKwh <= 10 ? 0.5 : 1}
+                    value={config.batteryCapacityKwh}
+                    onChange={(e) =>
+                      setConfig((prev) => ({
+                        ...prev,
+                        batteryCapacityKwh: Number(e.target.value),
+                      }))
+                    }
+                    className="w-full accent-emerald-500 cursor-pointer"
+                  />
+                  <div className="flex justify-between text-[10px] font-mono text-slate-500">
+                    <span>1 kWh Min</span>
+                    <span>Peso Pacco: {batteryPack.weightKg} kg</span>
+                    <span>150 kWh Max</span>
                   </div>
                 </div>
-              ) : (
-                <div className="p-3 rounded-lg bg-slate-950 border border-amber-500/40 font-mono text-xs flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <div className="text-[10px] text-slate-400">CONTRIBUTO TERMICO/WANKEL:</div>
-                    <div className="text-amber-300 font-bold">
-                      {selectedCoupledIce.peakPowerHp} CV • {selectedCoupledIce.peakTorqueNm} Nm
-                    </div>
-                  </div>
-                  <div className="text-slate-500 font-bold">+</div>
-                  <div>
-                    <div className="text-[10px] text-slate-400">SPINTA ELETTRICA ({systemSpec.badge}):</div>
-                    <div className="text-sky-300 font-bold">
-                      +{telemetry.specs.peakElectricPowerHp} CV • +{telemetry.specs.peakTorqueNm} Nm
-                    </div>
-                  </div>
-                  <div className="text-slate-500 font-bold">=</div>
-                  <div>
-                    <div className="text-[10px] text-emerald-400 font-bold">
-                      TOTALE COMBINATO DI SISTEMA:
-                    </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs font-mono">
+                  <div className="p-2.5 rounded bg-slate-950 border border-slate-800">
+                    <div className="text-[10px] text-slate-400">Scarica Massima Pacco:</div>
                     <div className="text-emerald-300 font-bold text-sm">
-                      {telemetry.peakPowerHp} CV @ {telemetry.peakPowerRpm} RPM •{' '}
-                      {telemetry.peakTorqueNm} Nm
+                      {batteryPack.maxDischargePowerKw} kW ({batteryPack.maxDischargePowerHp} CV)
+                    </div>
+                    <div className="text-[10px] text-slate-500">
+                      Continua: {batteryPack.maxContinuousDischargePowerKw} kW
+                    </div>
+                  </div>
+                  <div className="p-2.5 rounded bg-slate-950 border border-slate-800">
+                    <div className="text-[10px] text-slate-400">Tasso di Scarica (C-Rate):</div>
+                    <div className="text-amber-300 font-bold text-sm">
+                      {batteryPack.peakDischargeCRate}C Picco
+                    </div>
+                    <div className="text-[10px] text-slate-500">
+                      Continuo sicuro: {batteryPack.maxContinuousCRate}C
+                    </div>
+                  </div>
+                  <div className="p-2.5 rounded bg-slate-950 border border-slate-800">
+                    <div className="text-[10px] text-slate-400">Dimensioni Skateboard 3D:</div>
+                    <div className="text-sky-300 font-bold text-sm">
+                      {batteryPack.dimensionsMm.lengthMm} × {batteryPack.dimensionsMm.widthMm} × {batteryPack.dimensionsMm.heightMm} mm
+                    </div>
+                    <div className="text-[10px] text-slate-500">
+                      Densità celle: {batterySpec.cellDensityWhPerKg} Wh/kg
                     </div>
                   </div>
                 </div>
-              )}
-            </section>
+              </section>
+
+              {/* 3. Tensione e Raffreddamento Batteria */}
+              <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-mono text-slate-300 uppercase tracking-wider block">
+                    3. Tensione Operativa Pacco Batteria
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 font-mono text-xs">
+                    {VOLTAGE_ARCHITECTURES.map((vSpec) => {
+                      const isSelected = config.voltageArchitecture === vSpec.voltage;
+                      return (
+                        <button
+                          key={vSpec.voltage}
+                          type="button"
+                          onClick={() =>
+                            setConfig((prev) => ({
+                              ...prev,
+                              voltageArchitecture: vSpec.voltage,
+                            }))
+                          }
+                          className={`p-2.5 rounded-lg border text-left cursor-pointer transition flex flex-col justify-between ${
+                            isSelected
+                              ? 'bg-emerald-950/60 border-emerald-500 text-emerald-100'
+                              : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+                          }`}
+                        >
+                          <div className="font-bold flex items-center justify-between">
+                            <span>{vSpec.name}</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-emerald-300">
+                              {vSpec.voltage}V
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-slate-400 mt-1">{vSpec.description}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-mono text-slate-300 uppercase tracking-wider block">
+                    Sistema di Raffreddamento Pacco Batteria
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    {ELECTRIC_COOLING_SYSTEMS.map((cool) => {
+                      const isSelected = config.coolingSystem === cool.id;
+                      return (
+                        <button
+                          key={cool.id}
+                          type="button"
+                          onClick={() => setConfig((prev) => ({ ...prev, coolingSystem: cool.id }))}
+                          className={`p-2.5 rounded-lg border text-left transition cursor-pointer flex flex-col justify-between ${
+                            isSelected
+                              ? 'bg-emerald-950/60 border-emerald-500 text-emerald-100'
+                              : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+                          }`}
+                        >
+                          <div className="font-bold text-xs">{cool.name}</div>
+                          <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
+                            {cool.description}
+                          </p>
+                          <div className="mt-2 pt-1 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-mono">
+                            <span
+                              className={
+                                cool.reliabilityDeltaPercent < 0
+                                  ? 'text-red-400 font-bold'
+                                  : 'text-emerald-400 font-bold'
+                              }
+                            >
+                              {cool.reliabilityDeltaPercent > 0 ? '+' : ''}
+                              {cool.reliabilityDeltaPercent}% Affid.
+                            </span>
+                            <span className="text-slate-400">${cool.cost}</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </section>
+
+              {/* 4. Salvataggio Pacco Batteria nella Libreria Componenti */}
+              <section className="rounded-xl border border-emerald-500/50 bg-emerald-950/10 p-4 space-y-4">
+                <div className="flex items-center justify-between border-b border-emerald-800/60 pb-2">
+                  <div className="flex items-center gap-2">
+                    <Save className="w-4 h-4 text-emerald-400" />
+                    <h3 className="text-xs font-bold font-mono uppercase tracking-wider text-emerald-200">
+                      4. Salvataggio Pacco Batteria nella Libreria
+                    </h3>
+                  </div>
+                  <span className="text-[11px] font-mono text-emerald-300 font-semibold">
+                    ${batteryPack.unitProductionCost.toLocaleString('it-IT')} ({batteryPack.costPerKwh} $/kWh + BMS)
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-mono">
+                  <div className="space-y-1">
+                    <label className="text-slate-400">Nome Pacco Batteria:</label>
+                    <input
+                      type="text"
+                      value={batteryLibName}
+                      onChange={(e) => setBatteryLibName(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded bg-slate-900 border border-slate-800 text-slate-100"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-slate-400">Codice Identificativo:</label>
+                    <input
+                      type="text"
+                      value={batteryLibCode}
+                      onChange={(e) => setBatteryLibCode(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded bg-slate-900 border border-slate-800 text-slate-100"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-3 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleSaveBattery}
+                    className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold font-mono text-xs flex items-center gap-2 cursor-pointer transition shadow-md shadow-emerald-500/10"
+                  >
+                    <Save className="w-4 h-4" />
+                    <span>Salva Pacco Batteria (${batteryPack.developmentCost.capitalCost.toLocaleString('it-IT')} • {batteryPack.developmentCost.rdCost} R&D)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveSubPanel('bench')}
+                    className="px-3.5 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 border border-emerald-500/50 text-emerald-300 font-mono text-xs flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <span>Invia al Banco Prova</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                {/* Pacchi batteria salvati */}
+                <div className="pt-2 border-t border-slate-800/80 space-y-2 font-mono text-[11px]">
+                  <div className="text-[10px] text-slate-400 uppercase tracking-wider">
+                    Pacchi Batteria Salvati nella Libreria ({savedBatteryPacks.length}):
+                  </div>
+                  {savedBatteryPacks.length === 0 ? (
+                    <div className="text-slate-500 text-[10px]">
+                      Nessun pacco batteria ancora salvato. Salva questa configurazione per renderla disponibile in tutti i progetti.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {savedBatteryPacks.map((b) => (
+                        <div
+                          key={b.id}
+                          className="p-2.5 rounded-lg border border-slate-800 bg-slate-950 flex flex-col justify-between gap-1.5"
+                        >
+                          <div>
+                            <div className="font-bold text-slate-200">{b.name} ({b.codeName})</div>
+                            <div className="text-[10px] text-emerald-300">
+                              {b.spec.batteryCapacityKwh} kWh {b.spec.batteryChemistry} • {b.maxDischargePowerKw} kW • {b.weightKg} kg • ${b.unitProductionCost.toLocaleString('it-IT')}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 pt-1 border-t border-slate-800/60">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                loadBatteryToBench(b);
+                                setActiveSubPanel('bench');
+                              }}
+                              className="flex-1 px-2 py-1 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 text-[10px] font-bold text-center cursor-pointer"
+                            >
+                              Monta al Banco Prova →
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => loadBatteryToBench(b)}
+                              className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] cursor-pointer"
+                            >
+                              Modifica
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </section>
+            </div>
           )}
 
-          {/* SEZIONE 3 (PUNTI 1 E 2): TECNOLOGIA MOTORE ELETTRICO, CONFIGURAZIONE 1-4 MOTORI E TENSIONE */}
-          <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-              <div className="flex items-center gap-2">
-                <Cpu className="w-4 h-4 text-sky-400" />
-                <h2 className="text-xs font-bold font-mono uppercase tracking-wider text-slate-200">
-                  2. Tecnologia Elettromotore, Configurazione Assi & Tensione
-                </h2>
-              </div>
-              <span className="text-[11px] font-mono text-sky-400 font-semibold">
-                Field Weakening @ {telemetry.specs.cornerSpeedRpm} RPM
-              </span>
-            </div>
+          {/* =============================================================== */}
+          {/* PANNELLO 3: SIMULATORE POWERTRAIN AL BANCO PROVA                 */}
+          {/* =============================================================== */}
+          {activeSubPanel === 'bench' && (
+            <div className="space-y-6">
+              {/* Barra di Stato Componenti Montati al Banco */}
+              <section className="rounded-xl border border-amber-500/50 bg-amber-950/20 p-4 space-y-3 font-mono text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-800/60 pb-2">
+                  <div className="flex items-center gap-2">
+                    <Gauge className="w-4 h-4 text-amber-400" />
+                    <span className="font-bold uppercase tracking-wider text-amber-200">
+                      Componenti Attivi al Banco Prova
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-amber-300 font-semibold">
+                    Banco: {telemetry.specs.motorCount}× motori
+                    {telemetry.specs.hasMechanicalAwdShaft ? ' + albero AWD (0.92×)' : ` (${telemetry.specs.motorCount}.0×)`}
+                  </span>
+                </div>
 
-            {/* Tipologia Motore Elettrico */}
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-mono text-slate-300 uppercase tracking-wider block">
-                Tipologia Macchina Elettrica (ASM / PSM / IPM-SynRM / Flusso Assiale)
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                {ELECTRIC_MOTOR_TYPES.map((mot) => {
-                  const isSelected = config.electricMotorType === mot.id;
-                  return (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[11px]">
+                  <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-between">
+                    <div>
+                      <div className="text-[10px] text-slate-400 uppercase">Motore Elettrico Attivo:</div>
+                      <div className="font-bold text-sky-300">
+                        {motorSpec.name} ({unitMotor.peakPowerHp} CV / {unitMotor.peakTorqueNm} Nm)
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        {config.statorDiameterMm}mm × {config.rotorLengthMm}mm • {config.voltageArchitecture}V • ${unitMotor.unitProductionCost.toLocaleString('it-IT')}
+                      </div>
+                    </div>
                     <button
-                      key={mot.id}
                       type="button"
-                      onClick={() =>
-                        setConfig((prev) => ({
-                          ...prev,
-                          electricMotorType: mot.id,
-                          maxMotorRpm: Math.min(prev.maxMotorRpm, mot.maxSafeRpm),
-                        }))
-                      }
-                      className={`p-3 rounded-lg border text-left transition cursor-pointer flex flex-col justify-between ${
-                        isSelected
-                          ? 'bg-sky-950/60 border-sky-500 text-sky-100 shadow-sm'
-                          : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
-                      }`}
+                      onClick={() => setActiveSubPanel('motor')}
+                      className="px-2 py-1 rounded bg-sky-500/20 hover:bg-sky-500/30 text-sky-200 text-[10px] font-bold cursor-pointer shrink-0"
                     >
-                      <div className="flex justify-between items-start gap-2">
-                        <span className="text-xs font-bold">{mot.name}</span>
-                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-emerald-300 shrink-0">
-                          Eff. {mot.baseEfficiencyPercent}%
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-slate-400 mt-1.5 leading-relaxed">
-                        {mot.description}
-                      </p>
-                      <div className="mt-2 pt-1.5 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-mono text-amber-300">
-                        <span>
-                          Potenza ×{mot.powerMultiplier.toFixed(2)} • Coppia ×
-                          {mot.torqueMultiplier.toFixed(2)}
-                        </span>
-                        <span>Peso ×{mot.weightMultiplier.toFixed(2)}</span>
-                      </div>
+                      Modifica Motore
                     </button>
-                  );
-                })}
-              </div>
-            </div>
+                  </div>
 
-            {/* Configurazione Motori e Penalità Efficienza Reali (FWD vs RWD vs Dual/Tri/Quad) */}
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <label className="text-[11px] font-mono text-slate-300 uppercase tracking-wider">
-                  Configurazione Motori e Trazione (Efficienza RWD vs FWD vs Multi-Motore)
-                </label>
-                {config.motorLayout === 'DualMotor_eAWD' && (
-                  <label className="flex items-center gap-1.5 text-[11px] font-mono text-emerald-300 cursor-pointer bg-emerald-950/40 px-2.5 py-1 rounded border border-emerald-600/40">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(config.hasFrontDisconnect)}
-                      onChange={(e) =>
-                        setConfig((prev) => ({
-                          ...prev,
-                          hasFrontDisconnect: e.target.checked,
-                        }))
-                      }
-                      className="accent-emerald-500 cursor-pointer"
-                    />
-                    <span>Sgancio Meccanico Asse Ant. (Riduce penalità consumo a +4%)</span>
-                  </label>
-                )}
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                {MOTOR_LAYOUT_CONFIGS.map((lay) => {
-                  const isSelected = config.motorLayout === lay.id;
-                  const effectivePenaltyPct =
-                    lay.id === 'DualMotor_eAWD' &&
-                    (motorSpec.hasZeroDragWhenCoasting || config.hasFrontDisconnect)
-                      ? '+4.0% consumo (Low-Drag)'
-                      : lay.consumptionPenaltyMultiplier === 1.0
-                        ? 'Rif. Ottimale (0% pen.)'
-                        : `+${((lay.consumptionPenaltyMultiplier - 1) * 100).toFixed(1)}% consumo`;
-
-                  return (
-                    <button
-                      key={lay.id}
-                      type="button"
-                      onClick={() => setConfig((prev) => ({ ...prev, motorLayout: lay.id }))}
-                      className={`p-2.5 rounded-lg border text-left transition cursor-pointer flex flex-col justify-between ${
-                        isSelected
-                          ? 'bg-sky-950/60 border-sky-500 text-sky-100'
-                          : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-1">
-                        <span className="font-bold text-xs">{lay.name}</span>
-                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-amber-300 shrink-0">
-                          {lay.typicalHpRangeLabel}
-                        </span>
+                  <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-between">
+                    <div>
+                      <div className="text-[10px] text-slate-400 uppercase">Pacco Batteria Attivo:</div>
+                      <div className="font-bold text-emerald-300">
+                        {config.batteryCapacityKwh} kWh {batterySpec.name} ({batteryPack.maxDischargePowerKw} kW)
                       </div>
-                      <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
-                        {lay.description}
-                      </p>
-                      <div className="mt-2 pt-1 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-mono">
-                        <span className="text-sky-300">
-                          Eff. Base: {lay.baseSystemEfficiencyPercent}%
-                        </span>
-                        <span
-                          className={
-                            lay.consumptionPenaltyMultiplier === 1.0
-                              ? 'text-emerald-400 font-bold'
-                              : 'text-amber-400'
-                          }
+                      <div className="text-[10px] text-slate-400">
+                        {batteryPack.weightKg} kg • ${batteryPack.unitProductionCost.toLocaleString('it-IT')}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setActiveSubPanel('battery')}
+                      className="px-2 py-1 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 text-[10px] font-bold cursor-pointer shrink-0"
+                    >
+                      Modifica Batteria
+                    </button>
+                  </div>
+                </div>
+              </section>
+
+              {/* 1. Architettura Powertrain (BEV / MHEV / HEV / PHEV / EREV) */}
+              <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <Zap className="w-4 h-4 text-sky-400" />
+                    <h2 className="text-xs font-bold font-mono uppercase tracking-wider text-slate-200">
+                      1. Modalità Sistema Powertrain
+                    </h2>
+                  </div>
+                  <div className="flex items-center gap-1.5 font-mono text-[10px]">
+                    <span className="text-slate-400">Preset Rapidi:</span>
+                    <button
+                      type="button"
+                      onClick={() => applyQuickSizingPreset('citycar')}
+                      className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer"
+                    >
+                      Citycar (60-90 CV)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => applyQuickSizingPreset('sedan')}
+                      className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-sky-300 cursor-pointer"
+                    >
+                      Berlina RWD (200 CV)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => applyQuickSizingPreset('performance')}
+                      className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-amber-300 cursor-pointer"
+                    >
+                      Dual AWD (650 CV)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => applyQuickSizingPreset('hypercar')}
+                      className="px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/50 text-amber-300 font-bold cursor-pointer"
+                    >
+                      Quad Axial (2.100+ CV)
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                  {HYBRID_SYSTEM_TYPES.map((sys) => {
+                    const isSelected = config.systemType === sys.id;
+                    return (
+                      <button
+                        key={sys.id}
+                        type="button"
+                        onClick={() => handleSystemTypeChange(sys.id)}
+                        className={`p-3 rounded-lg border text-left transition cursor-pointer flex flex-col justify-between ${
+                          isSelected
+                            ? 'bg-sky-950/60 border-sky-500 shadow-md shadow-sky-500/10'
+                            : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="font-bold text-xs text-slate-100">{sys.name}</div>
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-sky-300 shrink-0">
+                            {sys.badge}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
+                          {sys.description}
+                        </p>
+                        <div className="mt-2.5 flex items-center justify-between text-[10px] font-mono border-t border-slate-800/80 pt-1.5 text-slate-400">
+                          <span>Taglio CO2: -{sys.emissionsReductionPercent}%</span>
+                          <span className="text-emerald-400 font-semibold">
+                            {sys.minBatteryKwh}–{sys.maxBatteryKwh} kWh
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+
+              {/* 2. Selettore Motore Termico / Wankel Accoppiato (Se Ibrido) */}
+              {systemSpec.hasIceEngine && (
+                <section className="rounded-xl border-2 border-amber-500/60 bg-amber-950/20 p-4 space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-800/80 pb-2">
+                    <div className="flex items-center gap-2">
+                      <Flame className="w-4 h-4 text-amber-400" />
+                      <h2 className="text-xs font-bold font-mono uppercase tracking-wider text-amber-200">
+                        2. Motore Termico / Wankel Accoppiato al Sistema Ibrido
+                      </h2>
+                    </div>
+                    <span className="text-[11px] font-mono text-amber-300 font-semibold">
+                      {selectedCoupledIce.name} ({selectedCoupledIce.peakPowerHp} CV /{' '}
+                      {selectedCoupledIce.peakTorqueNm} Nm)
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 font-mono text-xs">
+                    {availableCoupledIceEngines.map((ice) => {
+                      const isSelected = config.coupledIceOptionId === ice.id;
+                      return (
+                        <button
+                          key={ice.id}
+                          type="button"
+                          onClick={() => setConfig((prev) => ({ ...prev, coupledIceOptionId: ice.id }))}
+                          className={`p-3 rounded-lg border text-left cursor-pointer transition flex flex-col justify-between ${
+                            isSelected
+                              ? 'bg-amber-500/20 border-amber-500 text-amber-100 shadow-md shadow-amber-500/10'
+                              : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+                          }`}
                         >
-                          {effectivePenaltyPct}
-                        </span>
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="font-bold text-xs truncate text-slate-100">{ice.name}</span>
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-amber-300 shrink-0">
+                              {ice.sourceKind === 'LivePiston1A'
+                                ? 'LIVE 1A'
+                                : ice.sourceKind === 'LiveWankel1B'
+                                  ? 'LIVE 1B'
+                                  : ice.sourceKind === 'SavedDatabase'
+                                    ? 'DATABASE'
+                                    : 'STOCK'}
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-slate-400 mt-1">{ice.architectureLabel}</div>
+                          <div className="mt-2.5 pt-1.5 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-bold">
+                            <span className="text-amber-400">{ice.peakPowerHp} CV</span>
+                            <span className="text-sky-300">{ice.peakTorqueNm} Nm</span>
+                            <span className="text-slate-400">{ice.dryWeightKg} kg</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
+
+              {/* 3. Configurazione Assi & Scala Lineare (1.0x, 0.92x, 2.0x, 3.0x, 4.0x) */}
+              <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <div className="flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-sky-400" />
+                    <h2 className="text-xs font-bold font-mono uppercase tracking-wider text-slate-200">
+                      3. Configurazione Assi & Scala Multi-Motore (1×, 2×, 3×, 4×)
+                    </h2>
+                  </div>
+                  <span className="text-[11px] font-mono text-emerald-400 font-semibold">
+                    Scala Lineare Banco: {layoutSpec.totalOutputMultiplier}×
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                  {MOTOR_LAYOUT_CONFIGS.map((lay) => {
+                    const isSelected = config.motorLayout === lay.id;
+                    const effectivePenaltyPct =
+                      lay.id === 'DualMotor_eAWD' && (isAsm || config.hasFrontDisconnect)
+                        ? '+2.0% consumo (Low-Drag)'
+                        : lay.consumptionPenaltyMultiplier === 1.0
+                          ? 'Rif. Ottimale (0% pen.)'
+                          : `+${((lay.consumptionPenaltyMultiplier - 1) * 100).toFixed(1)}% consumo`;
+
+                    return (
+                      <button
+                        key={lay.id}
+                        type="button"
+                        onClick={() => setConfig((prev) => ({ ...prev, motorLayout: lay.id }))}
+                        className={`p-2.5 rounded-lg border text-left transition cursor-pointer flex flex-col justify-between ${
+                          isSelected
+                            ? 'bg-sky-950/60 border-sky-500 text-sky-100'
+                            : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-1">
+                          <span className="font-bold text-xs">{lay.name}</span>
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-amber-300 shrink-0">
+                            {lay.typicalHpRangeLabel}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
+                          {lay.description}
+                        </p>
+                        <div className="mt-2 pt-1 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-mono">
+                          <span className="text-sky-300">
+                            Eff. Base: {lay.baseSystemEfficiencyPercent}%
+                          </span>
+                          <span
+                            className={
+                              lay.consumptionPenaltyMultiplier === 1.0
+                                ? 'text-emerald-400 font-bold'
+                                : 'text-amber-400'
+                            }
+                          >
+                            {effectivePenaltyPct}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* 4. Logica Sgancio Asse Secondario (Punto 4) */}
+                {showDisconnectControl && (
+                  <div className="pt-2 border-t border-slate-800/80">
+                    {isAsm ? (
+                      <div className="flex items-center gap-2 p-3 rounded-lg border border-emerald-600/40 bg-emerald-950/30 font-mono text-xs text-emerald-200">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <div>
+                          <span className="font-bold">⚡ Spegnimento Elettronico Asse Integrato (ASM a Induzione):</span>
+                          <p className="text-[10px] text-slate-300 mt-0.5">
+                            Il rotore a gabbia di scoiattolo non possiede magneti permanenti: a vuoto non genera alcun freno magnetico o resistenza di trascinamento. Spegnimento elettronico a <strong>costo $0</strong>, <strong>peso +0 kg</strong> e consumi ridotti di serie.
+                          </p>
+                        </div>
                       </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+                    ) : (
+                      <label className="flex items-center justify-between gap-3 p-3 rounded-lg border border-amber-600/40 bg-amber-950/20 font-mono text-xs cursor-pointer hover:border-amber-500 transition">
+                        <div className="flex items-center gap-2.5">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(config.hasFrontDisconnect)}
+                            onChange={(e) =>
+                              setConfig((prev) => ({
+                                ...prev,
+                                hasFrontDisconnect: e.target.checked,
+                              }))
+                            }
+                            className="w-4 h-4 rounded accent-amber-500 cursor-pointer"
+                          />
+                          <div>
+                            <span className="font-bold text-amber-200">
+                              Unità di Sgancio Meccanico Asse Secondario (Dog-Clutch Disconnect)
+                            </span>
+                            <p className="text-[10px] text-slate-400 mt-0.5">
+                              Scollega fisicamente il rotore a magneti permanenti ad alta velocità: elimina il freno magnetico di trascinamento.
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <span className="text-emerald-400 font-bold block text-xs">-7% Consumi</span>
+                          <span className="text-slate-400 text-[10px]">+$350 • +4.5 kg</span>
+                        </div>
+                      </label>
+                    )}
+                  </div>
+                )}
+              </section>
 
-            {/* Architettura di Tensione: 400V / 800V / 1000V+ */}
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-mono text-slate-300 uppercase tracking-wider block">
-                Architettura di Tensione (400V Standard / 800V / 1000V+ Motorsport)
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 font-mono text-xs">
-                {VOLTAGE_ARCHITECTURES.map((vSpec) => {
-                  const isSelected = config.voltageArchitecture === vSpec.voltage;
-                  return (
-                    <button
-                      key={vSpec.voltage}
-                      type="button"
-                      onClick={() =>
-                        setConfig((prev) => ({
-                          ...prev,
-                          voltageArchitecture: vSpec.voltage,
-                        }))
-                      }
-                      className={`p-2.5 rounded-lg border text-left cursor-pointer transition flex flex-col justify-between ${
-                        isSelected
-                          ? 'bg-amber-950/60 border-amber-500 text-amber-100'
-                          : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
-                      }`}
-                    >
-                      <div className="font-bold flex items-center justify-between">
-                        <span>{vSpec.name}</span>
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-amber-300">
-                          ×{vSpec.powerMultiplier.toFixed(2)} CV
-                        </span>
-                      </div>
-                      <div className="text-[10px] text-slate-400 mt-1">{vSpec.description}</div>
-                      <div className="mt-2 pt-1 border-t border-slate-800/80 text-[10px] text-emerald-400">
-                        Cavi: {vSpec.cableWeightKg} kg • +{vSpec.efficiencyBonusPercent}% Eff.
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+              {/* 5. Riduttore, Cambio e Rapporto al Ponte */}
+              <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <div className="flex items-center gap-2">
+                    <Sliders className="w-4 h-4 text-sky-400" />
+                    <h2 className="text-xs font-bold font-mono uppercase tracking-wider text-slate-200">
+                      4. Riduttore & Trasmissione Elettrica
+                    </h2>
+                  </div>
+                  <span className="text-[11px] font-mono text-sky-300">
+                    Rapporto: {config.gearRatio}:1
+                  </span>
+                </div>
 
-            {/* Slider Dimensionamento Statore/Rotore e Regime Massimo */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
-              <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-2">
-                <div className="flex justify-between items-center text-xs font-mono">
-                  <span className="text-slate-300 font-semibold">Diametro Statore:</span>
-                  <span className="text-amber-400 font-bold">{config.statorDiameterMm} mm</span>
-                </div>
-                <input
-                  type="range"
-                  min={150}
-                  max={340}
-                  step={5}
-                  value={config.statorDiameterMm}
-                  onChange={(e) =>
-                    setConfig((prev) => ({
-                      ...prev,
-                      statorDiameterMm: Number(e.target.value),
-                    }))
-                  }
-                  className="w-full accent-amber-500 cursor-pointer"
-                />
-                <div className="flex justify-between text-[10px] font-mono text-slate-500">
-                  <span>150 mm (Citycar)</span>
-                  <span>340 mm (Hypercar)</span>
-                </div>
-              </div>
-
-              <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-2">
-                <div className="flex justify-between items-center text-xs font-mono">
-                  <span className="text-slate-300 font-semibold">Lunghezza Rotore:</span>
-                  <span className="text-amber-400 font-bold">{config.rotorLengthMm} mm</span>
-                </div>
-                <input
-                  type="range"
-                  min={80}
-                  max={280}
-                  step={5}
-                  value={config.rotorLengthMm}
-                  onChange={(e) =>
-                    setConfig((prev) => ({
-                      ...prev,
-                      rotorLengthMm: Number(e.target.value),
-                    }))
-                  }
-                  className="w-full accent-amber-500 cursor-pointer"
-                />
-                <div className="flex justify-between text-[10px] font-mono text-slate-500">
-                  <span>80 mm (Compatto)</span>
-                  <span>280 mm (Max Flusso)</span>
-                </div>
-              </div>
-
-              <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-2">
-                <div className="flex justify-between items-center text-xs font-mono">
-                  <span className="text-slate-300 font-semibold">Limitatore E-Motor:</span>
-                  <span className="text-sky-400 font-bold">{config.maxMotorRpm} RPM</span>
-                </div>
-                <input
-                  type="range"
-                  min={14000}
-                  max={motorSpec.maxSafeRpm}
-                  step={500}
-                  value={Math.min(config.maxMotorRpm, motorSpec.maxSafeRpm)}
-                  onChange={(e) =>
-                    setConfig((prev) => ({
-                      ...prev,
-                      maxMotorRpm: Number(e.target.value),
-                    }))
-                  }
-                  className="w-full accent-sky-500 cursor-pointer"
-                />
-                <div className="flex justify-between text-[10px] font-mono text-slate-500">
-                  <span>14.000 RPM</span>
-                  <span>{motorSpec.maxSafeRpm} RPM Max</span>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* SEZIONE 4 (PUNTI 3 E 4): PACCO BATTERIE ($/kWh REALISTICI) & RAFFREDDAMENTO */}
-          <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-              <div className="flex items-center gap-2">
-                <Battery className="w-4 h-4 text-emerald-400" />
-                <h2 className="text-xs font-bold font-mono uppercase tracking-wider text-slate-200">
-                  3. Chimica Pacco Batteria ($/kWh Reali) & Gestione Termica
-                </h2>
-              </div>
-              <span className="text-[11px] font-mono text-emerald-400 font-bold">
-                Costo Pacco Batteria: ${costs.batteryCost.toLocaleString('it-IT')} (
-                {batterySpec.costPerKwh} $/kWh)
-              </span>
-            </div>
-
-            {/* Chimica Batteria */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {BATTERY_CHEMISTRIES.map((bat) => {
-                const isSelected = config.batteryChemistry === bat.id;
-                const packCostPreview = Math.round(config.batteryCapacityKwh * bat.costPerKwh);
-                return (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 font-mono text-xs">
                   <button
-                    key={bat.id}
                     type="button"
-                    onClick={() => setConfig((prev) => ({ ...prev, batteryChemistry: bat.id }))}
-                    className={`p-3 rounded-lg border text-left transition cursor-pointer flex flex-col justify-between ${
-                      isSelected
-                        ? 'bg-emerald-950/60 border-emerald-500 text-emerald-100'
+                    onClick={() => setConfig((prev) => ({ ...prev, gearboxType: 'SingleSpeedDirect' }))}
+                    className={`p-3 rounded-lg border text-left cursor-pointer transition ${
+                      config.gearboxType === 'SingleSpeedDirect'
+                        ? 'bg-sky-950/60 border-sky-500 text-sky-100'
                         : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
                     }`}
                   >
-                    <div className="flex justify-between items-start gap-2">
-                      <span className="text-xs font-bold">{bat.name}</span>
-                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold shrink-0">
-                        {bat.costPerKwh} $/kWh
-                      </span>
-                    </div>
-                    <p className="text-[10px] text-slate-400 mt-1.5 leading-relaxed">
-                      {bat.description}
+                    <div className="font-bold">Rapporto Fisso Diretto (Single Speed)</div>
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      Standard industriale BEV: massima semplicità meccanica, peso ridotto, zero perdite di cambiata.
                     </p>
-                    <div className="mt-2 pt-1.5 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-mono">
-                      <span className="text-sky-300">
-                        {bat.cellDensityWhPerKg} Wh/kg • Base {(bat.baseLifespanKm / 1000).toFixed(0)}k km
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setConfig((prev) => ({ ...prev, gearboxType: 'TwoSpeedDualClutch' }))}
+                    className={`p-3 rounded-lg border text-left cursor-pointer transition ${
+                      config.gearboxType === 'TwoSpeedDualClutch'
+                        ? 'bg-amber-950/60 border-amber-500 text-amber-100'
+                        : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="font-bold">Cambio Elettrico a 2 Rapporti (Doppia Frizione)</div>
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      1ª corta per scatto 0-100 fulmineo, 2ª lunga per velocità di punta e consumi autostradali (+18 kg, +$420).
+                    </p>
+                  </button>
+                </div>
+
+                <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-2">
+                  <div className="flex justify-between items-center text-xs font-mono">
+                    <span className="text-slate-300 font-semibold">Rapporto Finale al Ponte (Gear Ratio):</span>
+                    <span className="text-sky-400 font-bold">{config.gearRatio.toFixed(1)}:1</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={5.5}
+                    max={13.5}
+                    step={0.1}
+                    value={config.gearRatio}
+                    onChange={(e) =>
+                      setConfig((prev) => ({
+                        ...prev,
+                        gearRatio: Number(e.target.value),
+                      }))
+                    }
+                    className="w-full accent-sky-500 cursor-pointer"
+                  />
+                  <div className="flex justify-between text-[10px] font-mono text-slate-500">
+                    <span>5.5:1 (Allungo 350+ km/h)</span>
+                    <span>9.0:1 (Bilanciato)</span>
+                    <span>13.5:1 (Accelerazione Spinta)</span>
+                  </div>
+                </div>
+              </section>
+
+              {/* 6. Assegnazione Marchio, Costi & Omologazione Powertrain Completo */}
+              <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <div className="flex items-center gap-2">
+                    <Save className="w-4 h-4 text-emerald-400" />
+                    <h2 className="text-xs font-bold font-mono uppercase tracking-wider text-slate-200">
+                      5. Omologazione Powertrain Completo nel Database
+                    </h2>
+                  </div>
+                  <span className="text-[11px] font-mono text-slate-400">
+                    Gruppo Propulsore per Pianali
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs font-mono">
+                  <div className="space-y-1">
+                    <label className="text-slate-400">Nome Commerciale Powertrain:</label>
+                    <input
+                      type="text"
+                      value={engineName}
+                      onChange={(e) => setEngineName(e.target.value)}
+                      className="w-full px-3 py-1.5 rounded bg-slate-950 border border-slate-800 text-slate-100"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-slate-400">Codice Progetto Industriale:</label>
+                    <input
+                      type="text"
+                      value={codeName}
+                      onChange={(e) => setCodeName(e.target.value)}
+                      className="w-full px-3 py-1.5 rounded bg-slate-950 border border-slate-800 text-slate-100"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-slate-400">Sotto-Brand Proprietario:</label>
+                    <select
+                      value={selectedSubBrandId}
+                      onChange={(e) => setSelectedSubBrandId(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded bg-slate-950 border border-slate-800 text-slate-100"
+                    >
+                      {subBrands.map((sb) => (
+                        <option key={sb.id} value={sb.id}>
+                          {sb.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Riepilogo Costi Unitari & Omologazione */}
+                <div className="p-3.5 rounded-lg bg-slate-950 border border-slate-800 flex flex-wrap items-center justify-between gap-4 font-mono text-xs">
+                  <div className="space-y-0.5">
+                    <div className="text-slate-400 uppercase text-[10px]">
+                      Costo Sviluppo Omologazione:
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-emerald-400 font-bold">
+                        ${costs.developmentCost.capitalCost.toLocaleString('it-IT')}
                       </span>
-                      <span className="text-amber-300 font-bold">
-                        Pacco {config.batteryCapacityKwh} kWh = $
-                        {packCostPreview.toLocaleString('it-IT')}
+                      <span className="text-sky-400 font-bold">
+                        {costs.developmentCost.rdCost} PTS R&D
                       </span>
                     </div>
+                  </div>
+
+                  <div className="space-y-0.5">
+                    <div className="text-slate-400 uppercase text-[10px]">
+                      Costo Produzione Powertrain:
+                    </div>
+                    <div className="text-amber-400 font-bold text-sm">
+                      ${costs.unitProductionCost.toLocaleString('it-IT')} / unità
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleHomologate}
+                    className="px-5 py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold flex items-center gap-2 shadow-lg shadow-emerald-500/10 cursor-pointer transition"
+                  >
+                    <Save className="w-4 h-4" />
+                    <span>Omologa Powertrain</span>
                   </button>
-                );
-              })}
+                </div>
+              </section>
             </div>
-
-            {/* Slider Capacità Batteria (kWh) */}
-            <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-2">
-              <div className="flex flex-wrap justify-between items-center gap-2 text-xs font-mono">
-                <span className="text-slate-300 font-semibold">
-                  Capacità Pacco Batteria ({systemSpec.badge}):
-                </span>
-                <span className="text-emerald-400 font-bold">
-                  {config.batteryCapacityKwh} kWh • Costo Pacco: $
-                  {costs.batteryCost.toLocaleString('it-IT')} • Peso Batteria:{' '}
-                  {telemetry.specs.batteryWeightKg} kg
-                </span>
-              </div>
-              <input
-                type="range"
-                min={systemSpec.minBatteryKwh}
-                max={systemSpec.maxBatteryKwh}
-                step={systemSpec.maxBatteryKwh > 20 ? 1 : 0.2}
-                value={config.batteryCapacityKwh}
-                onChange={(e) =>
-                  setConfig((prev) => ({
-                    ...prev,
-                    batteryCapacityKwh: Number(e.target.value),
-                  }))
-                }
-                className="w-full accent-emerald-500 cursor-pointer"
-              />
-              <div className="flex justify-between text-[10px] font-mono text-slate-500">
-                <span>{systemSpec.minBatteryKwh} kWh Min</span>
-                <span>
-                  Scarica Picco Attuale: {telemetry.specs.cRatePeak}C (Max Cont.{' '}
-                  {batterySpec.maxContinuousCRate}C)
-                </span>
-                <span>{systemSpec.maxBatteryKwh} kWh Max</span>
-              </div>
-            </div>
-
-            {/* Sistema di Raffreddamento (Impatto Dinamico su Affidabilità e Durata) */}
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-mono text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                <Wind className="w-3.5 h-3.5 text-sky-400" />
-                <span>Sistema di Raffreddamento (Governa Thermal Throttling e Affidabilità %)</span>
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                {ELECTRIC_COOLING_SYSTEMS.map((cool) => {
-                  const isSelected = config.coolingSystem === cool.id;
-                  return (
-                    <button
-                      key={cool.id}
-                      type="button"
-                      onClick={() => setConfig((prev) => ({ ...prev, coolingSystem: cool.id }))}
-                      className={`p-2.5 rounded-lg border text-left transition cursor-pointer flex flex-col justify-between ${
-                        isSelected
-                          ? 'bg-sky-950/60 border-sky-500 text-sky-100'
-                          : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
-                      }`}
-                    >
-                      <div className="flex justify-between items-start gap-1">
-                        <span className="text-xs font-bold">{cool.name}</span>
-                      </div>
-                      <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
-                        {cool.description}
-                      </p>
-                      <div className="mt-2 pt-1 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-mono">
-                        <span
-                          className={
-                            cool.reliabilityDeltaPercent < 0
-                              ? 'text-red-400 font-bold'
-                              : 'text-emerald-400 font-bold'
-                          }
-                        >
-                          {cool.reliabilityDeltaPercent > 0 ? '+' : ''}
-                          {cool.reliabilityDeltaPercent}% Affid.
-                        </span>
-                        <span className="text-slate-400">
-                          +{cool.weightKg} kg • ${cool.cost}
-                        </span>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </section>
-
-          {/* SEZIONE 3B: LIBRERIA COMPONENTI SEPARATI (MOTORE SINGOLO / PACCO BATTERIA) & BANCO */}
-          <section className="rounded-xl border border-violet-500/50 bg-violet-950/10 p-4 space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-violet-800/60 pb-2">
-              <div className="flex items-center gap-2">
-                <Layers className="w-4 h-4 text-violet-400" />
-                <h2 className="text-xs font-bold font-mono uppercase tracking-wider text-violet-200">
-                  Componenti Separati: Motore Singolo • Pacco Batteria • Banco Prova
-                </h2>
-              </div>
-              <span className="text-[11px] font-mono text-violet-300 font-semibold">
-                Banco: {telemetry.specs.motorCount}× motori
-                {telemetry.specs.hasMechanicalAwdShaft ? ' + albero AWD (0.92×)' : ` (${telemetry.specs.motorCount}.0×)`}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 font-mono text-xs">
-              {/* Singola unità motore */}
-              <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-2">
-                <div className="text-[10px] text-slate-400 uppercase">Singola Unità Motore (1.0×)</div>
-                <div className="text-sky-300 font-bold text-sm">
-                  {unitMotor.peakPowerHp} CV • {unitMotor.peakTorqueNm} Nm
-                </div>
-                <div className="text-[10px] text-slate-400">
-                  FW {unitMotor.cornerSpeedRpm} RPM • Max {unitMotor.maxMotorRpm} RPM • {unitMotor.dryWeightKg} kg
-                </div>
-                <div className="text-[10px] text-amber-300">
-                  Costo unità: ${unitMotor.unitProductionCost.toLocaleString('it-IT')} (indipendente da posizione/orientamento)
-                </div>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <input
-                    type="text"
-                    value={motorLibName}
-                    onChange={(e) => setMotorLibName(e.target.value)}
-                    className="px-2 py-1 rounded bg-slate-900 border border-slate-800 text-slate-100 text-[11px]"
-                  />
-                  <input
-                    type="text"
-                    value={motorLibCode}
-                    onChange={(e) => setMotorLibCode(e.target.value)}
-                    className="px-2 py-1 rounded bg-slate-900 border border-slate-800 text-slate-100 text-[11px]"
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={handleSaveMotor}
-                  className="w-full px-3 py-1.5 rounded bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <Save className="w-3.5 h-3.5" />
-                  Salva Motore Singolo (${unitMotor.developmentCost.capitalCost.toLocaleString('it-IT')} • {unitMotor.developmentCost.rdCost} R&D)
-                </button>
-              </div>
-
-              {/* Pacco batteria */}
-              <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-2">
-                <div className="flex items-center justify-between text-[10px] text-slate-400 uppercase">
-                  <span>Pacco Batteria Indipendente</span>
-                  {config.batterySpec && (
-                    <button
-                      type="button"
-                      onClick={() => setConfig((prev) => ({ ...prev, batterySpec: undefined }))}
-                      className="text-rose-300 normal-case hover:text-rose-200 cursor-pointer"
-                    >
-                      Scollega pacco salvato
-                    </button>
-                  )}
-                </div>
-                <div className="text-emerald-300 font-bold text-sm">
-                  {batteryPack.batteryCapacityKwh} kWh {batteryPack.spec.batteryChemistry} • {batteryPack.spec.voltageArchitecture}V
-                </div>
-                <div className="text-[10px] text-slate-400">
-                  Scarica max {batteryPack.maxDischargePowerKw} kW ({batteryPack.maxDischargePowerHp} CV) • {batteryPack.weightKg} kg
-                </div>
-                <div className="text-[10px] text-amber-300">
-                  Costo pacco: ${batteryPack.unitProductionCost.toLocaleString('it-IT')} ({batteryPack.costPerKwh} $/kWh + BMS)
-                </div>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <input
-                    type="text"
-                    value={batteryLibName}
-                    onChange={(e) => setBatteryLibName(e.target.value)}
-                    className="px-2 py-1 rounded bg-slate-900 border border-slate-800 text-slate-100 text-[11px]"
-                  />
-                  <input
-                    type="text"
-                    value={batteryLibCode}
-                    onChange={(e) => setBatteryLibCode(e.target.value)}
-                    className="px-2 py-1 rounded bg-slate-900 border border-slate-800 text-slate-100 text-[11px]"
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={handleSaveBattery}
-                  className="w-full px-3 py-1.5 rounded bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <Save className="w-3.5 h-3.5" />
-                  Salva Pacco Batteria (${batteryPack.developmentCost.capitalCost.toLocaleString('it-IT')} • {batteryPack.developmentCost.rdCost} R&D)
-                </button>
-              </div>
-            </div>
-
-            {/* Librerie salvate: carica al banco */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 font-mono text-[11px]">
-              <div className="space-y-1.5">
-                <div className="text-[10px] text-slate-400 uppercase">Motori salvati ({savedElectricMotors.length})</div>
-                {savedElectricMotors.length === 0 ? (
-                  <div className="text-slate-500 text-[10px]">Nessun motore salvato.</div>
-                ) : (
-                  savedElectricMotors.map((m) => (
-                    <button
-                      key={m.id}
-                      type="button"
-                      onClick={() => loadMotorToBench(m)}
-                      className="w-full p-2 rounded border border-slate-800 bg-slate-950 hover:border-sky-500 text-left cursor-pointer"
-                    >
-                      <div className="font-bold text-slate-100">{m.name} ({m.codeName})</div>
-                      <div className="text-[10px] text-sky-300">
-                        {m.peakPowerHp} CV • {m.peakTorqueNm} Nm • ${m.unitProductionCost.toLocaleString('it-IT')} → Carica al banco
-                      </div>
-                    </button>
-                  ))
-                )}
-              </div>
-              <div className="space-y-1.5">
-                <div className="text-[10px] text-slate-400 uppercase">Pacchi batteria salvati ({savedBatteryPacks.length})</div>
-                {savedBatteryPacks.length === 0 ? (
-                  <div className="text-slate-500 text-[10px]">Nessun pacco salvato.</div>
-                ) : (
-                  savedBatteryPacks.map((b) => (
-                    <button
-                      key={b.id}
-                      type="button"
-                      onClick={() => loadBatteryToBench(b)}
-                      className="w-full p-2 rounded border border-slate-800 bg-slate-950 hover:border-emerald-500 text-left cursor-pointer"
-                    >
-                      <div className="font-bold text-slate-100">{b.name} ({b.codeName})</div>
-                      <div className="text-[10px] text-emerald-300">
-                        {b.spec.batteryCapacityKwh} kWh {b.spec.batteryChemistry} • {b.maxDischargePowerKw} kW • ${b.unitProductionCost.toLocaleString('it-IT')} → Carica al banco
-                      </div>
-                    </button>
-                  ))
-                )}
-              </div>
-            </div>
-          </section>
-
-          {/* SEZIONE 5 (PUNTO 5): IMPATTO REALE DI FASCIA PREZZO (INVERTER IGBT -> SiC) E CLASSE D'USO */}
-          <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-              <div className="flex items-center gap-2">
-                <Sliders className="w-4 h-4 text-amber-400" />
-                <h2 className="text-xs font-bold font-mono uppercase tracking-wider text-slate-200">
-                  4. Fascia Prezzo (Elettronica Inverter) & Classe d’Uso (Taratura Fisica)
-                </h2>
-              </div>
-              <span className="text-[11px] font-mono text-amber-300">
-                {tierSpec.inverterShort} • {classSpec.badge}
-              </span>
-            </div>
-
-            {/* Fascia di Prezzo (PriceTier -> Inverter IGBT 86% vs MOSFET SiC 97.5%) */}
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-mono text-slate-300 uppercase tracking-wider block">
-                Fascia di Prezzo (Governa Tecnologia Inverter IGBT/SiC, +CV, Consumi e Durata km)
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {PRICE_TIERS.map((tier) => {
-                  const tSpec = PRICE_TIER_EV_SPECS[tier];
-                  const isSelected = config.priceTier === tier;
-                  return (
-                    <button
-                      key={tier}
-                      type="button"
-                      onClick={() =>
-                        setConfig((prev) => ({
-                          ...prev,
-                          priceTier: tier,
-                          inverterTech: tSpec.mappedInverterTech,
-                        }))
-                      }
-                      className={`p-2.5 rounded-lg border text-left transition cursor-pointer flex flex-col justify-between ${
-                        isSelected
-                          ? 'bg-amber-950/60 border-amber-500 text-amber-100'
-                          : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-bold text-xs">Fascia {tier}</span>
-                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-sky-300">
-                          {tSpec.inverterShort}
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-slate-400 mt-1">{tSpec.description}</p>
-                      <div className="mt-2 pt-1 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-mono text-emerald-300">
-                        <span>Potenza ×{tSpec.powerMultiplier.toFixed(2)}</span>
-                        <span>Consumo ×{tSpec.consumptionMultiplier.toFixed(2)}</span>
-                        <span>Durata ×{tSpec.lifespanMultiplier.toFixed(2)}</span>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Classe d'Uso (ReferenceClass -> Normale / Comfort / Sport / Corsa / Fuoristrada) */}
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-mono text-slate-300 uppercase tracking-wider block">
-                Classe d’Uso (Modifica C-Rate di Scarica, Buffer Batteria, Peso, Affidabilità e Km)
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                {REFERENCE_CLASSES.map((refCls) => {
-                  const cSpec = REFERENCE_CLASS_EV_SPECS[refCls];
-                  const isSelected = config.referenceClass === refCls;
-                  return (
-                    <button
-                      key={refCls}
-                      type="button"
-                      onClick={() =>
-                        setConfig((prev) => ({
-                          ...prev,
-                          referenceClass: refCls,
-                        }))
-                      }
-                      className={`p-2.5 rounded-lg border text-left transition cursor-pointer flex flex-col justify-between ${
-                        isSelected
-                          ? 'bg-sky-950/60 border-sky-500 text-sky-100'
-                          : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-1">
-                        <span className="font-bold text-xs">Classe {refCls}</span>
-                        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-amber-300">
-                          CV ×{cSpec.powerMultiplier.toFixed(2)} • Nm ×
-                          {cSpec.torqueMultiplier.toFixed(2)}
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
-                        {cSpec.description}
-                      </p>
-                      <div className="mt-2 pt-1 border-t border-slate-800/80 text-[10px] font-mono text-emerald-400">
-                        Target: {cSpec.targetLifespanDescription}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </section>
-
-          {/* SEZIONE 6: ASSEGNAZIONE MARCHIO, COSTI & OMOLOGAZIONE */}
-          <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-              <div className="flex items-center gap-2">
-                <Save className="w-4 h-4 text-emerald-400" />
-                <h2 className="text-xs font-bold font-mono uppercase tracking-wider text-slate-200">
-                  5. Identificativo Commerciale & Omologazione Nel Database
-                </h2>
-              </div>
-              <span className="text-[11px] font-mono text-slate-400">
-                Salvataggio in Libreria Motori
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs font-mono">
-              <div className="space-y-1">
-                <label className="text-slate-400">Nome Commerciale Powertrain:</label>
-                <input
-                  type="text"
-                  value={engineName}
-                  onChange={(e) => setEngineName(e.target.value)}
-                  className="w-full px-3 py-1.5 rounded bg-slate-950 border border-slate-800 text-slate-100"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-slate-400">Codice Progetto Industriale:</label>
-                <input
-                  type="text"
-                  value={codeName}
-                  onChange={(e) => setCodeName(e.target.value)}
-                  className="w-full px-3 py-1.5 rounded bg-slate-950 border border-slate-800 text-slate-100"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-slate-400">Sotto-Brand Proprietario:</label>
-                <select
-                  value={selectedSubBrandId}
-                  onChange={(e) => setSelectedSubBrandId(e.target.value)}
-                  className="w-full px-2.5 py-1.5 rounded bg-slate-950 border border-slate-800 text-slate-100"
-                >
-                  {subBrands.map((sb) => (
-                    <option key={sb.id} value={sb.id}>
-                      {sb.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* Riepilogo Scomposizione Costi Unitari & Omologazione */}
-            <div className="p-3.5 rounded-lg bg-slate-950 border border-slate-800 flex flex-wrap items-center justify-between gap-4 font-mono text-xs">
-              <div className="space-y-0.5">
-                <div className="text-slate-400 uppercase text-[10px]">
-                  Costo Sviluppo Omologazione:
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-emerald-400 font-bold">
-                    ${costs.developmentCost.capitalCost.toLocaleString('it-IT')}
-                  </span>
-                  <span className="text-sky-400 font-bold">
-                    {costs.developmentCost.rdCost} PTS R&D
-                  </span>
-                </div>
-              </div>
-
-              <div className="space-y-0.5">
-                <div className="text-slate-400 uppercase text-[10px]">
-                  Costo Unitario (Batt. ${costs.batteryCost.toLocaleString('it-IT')} + Mot/Inv $
-                  {(costs.motorSystemCost + costs.inverterAndCoolingCost).toLocaleString('it-IT')}
-                  {costs.coupledIceCost > 0
-                    ? ` + ICE $${costs.coupledIceCost.toLocaleString('it-IT')}`
-                    : ''}
-                  ):
-                </div>
-                <div className="text-amber-400 font-bold text-sm">
-                  ${costs.unitProductionCost.toLocaleString('it-IT')} / unità
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleHomologate}
-                className="px-5 py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold flex items-center gap-2 shadow-lg shadow-emerald-500/10 cursor-pointer transition"
-              >
-                <Save className="w-4 h-4" />
-                <span>Omologa Powertrain</span>
-              </button>
-            </div>
-          </section>
+          )}
         </div>
 
         {/* ================================================================= */}
         {/* COLONNA DESTRA: BANCO PROVA 2D, TELEMETRIA & CAD 3D (5 Colonne)   */}
         {/* ================================================================= */}
         <div className="lg:col-span-5 space-y-6">
-          {/* BANCO PROVA GRAFICO 2D MULTI-CURVA */}
+          {/* BANCO PROVA GRAFICO 2D */}
           <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-3">
             <div className="flex items-center justify-between border-b border-slate-800 pb-2">
               <div className="flex items-center gap-2">
                 <Gauge className="w-4 h-4 text-sky-400" />
                 <h3 className="text-xs font-bold font-mono uppercase tracking-wider text-slate-200">
-                  Banco Prova Dinamometrico (1C)
+                  {activeSubPanel === 'motor'
+                    ? 'Banco Prova Singola Unità (1.0×)'
+                    : activeSubPanel === 'battery'
+                      ? 'Diagnostica Scarica Batteria'
+                      : 'Banco Prova Powertrain Completo'}
                 </h3>
               </div>
               <span className="text-xs font-mono text-sky-300 font-bold">
-                {telemetry.peakPowerHp} CV ({Math.round(telemetry.peakPowerHp * 0.7355)} kW) •{' '}
-                {telemetry.peakTorqueNm} Nm
+                {activeSubPanel === 'motor'
+                  ? `${unitMotor.peakPowerHp} CV • ${unitMotor.peakTorqueNm} Nm`
+                  : activeSubPanel === 'battery'
+                    ? `${batteryPack.maxDischargePowerKw} kW • ${batteryPack.batteryCapacityKwh} kWh`
+                    : `${telemetry.peakPowerHp} CV • ${telemetry.peakTorqueNm} Nm`}
               </span>
             </div>
 
-            <EvHybridDynoCanvas2D
-              curve={telemetry.curve}
-              iceOnlyCurve={telemetry.iceOnlyCurve}
-              electricOnlyCurve={telemetry.electricOnlyCurve}
-              redlineRpm={telemetry.redlineRpm}
-              cornerSpeedRpm={telemetry.specs.cornerSpeedRpm ?? 6500}
-              systemType={config.systemType}
-              engineName={engineName}
-              architectureBadge={`${systemSpec.badge} • ${layoutSpec.shortName}`}
-              erevGeneratorOutputKw={telemetry.specs.erevGeneratorOutputKw}
-            />
+            {activeSubPanel === 'motor' ? (
+              <EvHybridDynoCanvas2D
+                curve={unitMotor.curve}
+                redlineRpm={unitMotor.maxMotorRpm}
+                cornerSpeedRpm={unitMotor.cornerSpeedRpm}
+                systemType="PureEV"
+                engineName={motorLibName}
+                architectureBadge={`Singolo ${unitMotor.spec.electricMotorType} (1.0×)`}
+              />
+            ) : activeSubPanel === 'battery' ? (
+              <div className="p-4 rounded-lg bg-slate-950 border border-slate-800 space-y-3 font-mono text-xs">
+                <div className="text-emerald-400 font-bold flex items-center justify-between border-b border-slate-800 pb-2">
+                  <span>Pacco Accumulatori {batteryPack.spec.batteryChemistry}</span>
+                  <span>{batteryPack.usableCapacityKwh} kWh Utili / {config.batteryCapacityKwh} kWh Totali</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                  <div className="p-2 rounded bg-slate-900 border border-slate-800">
+                    <span className="text-slate-400 block text-[10px]">Scarica Massima:</span>
+                    <span className="text-emerald-300 font-bold text-sm">
+                      {batteryPack.maxDischargePowerKw} kW ({batteryPack.maxDischargePowerHp} CV)
+                    </span>
+                  </div>
+                  <div className="p-2 rounded bg-slate-900 border border-slate-800">
+                    <span className="text-slate-400 block text-[10px]">C-Rate Picco:</span>
+                    <span className="text-amber-300 font-bold text-sm">{batteryPack.peakDischargeCRate}C</span>
+                  </div>
+                  <div className="p-2 rounded bg-slate-900 border border-slate-800">
+                    <span className="text-slate-400 block text-[10px]">Durata Cicli SoH:</span>
+                    <span className="text-sky-300 font-bold text-sm">{batteryPack.cycleLife} cicli</span>
+                  </div>
+                  <div className="p-2 rounded bg-slate-900 border border-slate-800">
+                    <span className="text-slate-400 block text-[10px]">Durata Stimata km:</span>
+                    <span className="text-slate-100 font-bold text-sm">{(batteryPack.estimatedLifespanKm / 1000).toFixed(0)}k km</span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <EvHybridDynoCanvas2D
+                curve={telemetry.curve}
+                iceOnlyCurve={telemetry.iceOnlyCurve}
+                electricOnlyCurve={telemetry.electricOnlyCurve}
+                redlineRpm={telemetry.redlineRpm}
+                cornerSpeedRpm={telemetry.specs.cornerSpeedRpm ?? 6500}
+                systemType={config.systemType}
+                engineName={engineName}
+                architectureBadge={`${systemSpec.badge} • ${layoutSpec.shortName}`}
+                erevGeneratorOutputKw={telemetry.specs.erevGeneratorOutputKw}
+              />
+            )}
           </section>
 
           {/* TELEMETRIA SINTETICA DETTAGLIATA */}
@@ -2013,7 +2406,13 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200 border-b border-slate-800 pb-2 flex items-center justify-between">
               <span className="flex items-center gap-2">
                 <Activity className="w-4 h-4 text-emerald-400" />
-                <span>Telemetria Reale, Efficienza & Durata Stimata</span>
+                <span>
+                  {activeSubPanel === 'motor'
+                    ? 'Telemetria Singola Unità Motrice'
+                    : activeSubPanel === 'battery'
+                      ? 'Specifiche Pacco Batteria'
+                      : 'Telemetria Powertrain Completo'}
+                </span>
               </span>
               <span className="text-[10px] text-amber-300">{tierSpec.inverterShort}</span>
             </h3>
@@ -2021,89 +2420,114 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
             <div className="grid grid-cols-2 gap-2.5">
               <div className="p-2.5 rounded bg-slate-950 border border-slate-800">
                 <div className="text-[10px] text-slate-400">
-                  {systemSpec.hasIceEngine && config.systemType !== 'RangeExtender'
-                    ? 'Potenza Totale Combinata:'
-                    : 'Potenza Elettrica Picco:'}
+                  {activeSubPanel === 'motor' ? 'Potenza Unità (1.0×):' : 'Potenza Totale:'}
                 </div>
                 <div className="text-amber-300 font-bold text-sm">
-                  {telemetry.peakPowerHp} CV ({Math.round(telemetry.peakPowerHp * 0.7355)} kW)
+                  {activeSubPanel === 'motor'
+                    ? `${unitMotor.peakPowerHp} CV (${unitMotor.peakPowerKw} kW)`
+                    : `${telemetry.peakPowerHp} CV (${Math.round(telemetry.peakPowerHp * 0.7355)} kW)`}
                 </div>
                 <div className="text-[10px] text-slate-400">
-                  E-Motor: {telemetry.specs.peakElectricPowerHp} CV (Cont.{' '}
-                  {telemetry.specs.continuousPowerKw} kW)
+                  {activeSubPanel === 'motor'
+                    ? `Cont. ${unitMotor.continuousPowerKw} kW`
+                    : `E-Motor: ${telemetry.specs.peakElectricPowerHp} CV`}
                 </div>
               </div>
 
               <div className="p-2.5 rounded bg-slate-950 border border-slate-800">
                 <div className="text-[10px] text-slate-400">
-                  {systemSpec.hasIceEngine && config.systemType !== 'RangeExtender'
-                    ? 'Coppia Totale Combinata:'
-                    : 'Coppia Motore da 0 RPM:'}
+                  {activeSubPanel === 'motor' ? 'Coppia Unità da 0 RPM:' : 'Coppia Totale:'}
                 </div>
-                <div className="text-sky-300 font-bold text-sm">{telemetry.peakTorqueNm} Nm</div>
+                <div className="text-sky-300 font-bold text-sm">
+                  {activeSubPanel === 'motor' ? `${unitMotor.peakTorqueNm} Nm` : `${telemetry.peakTorqueNm} Nm`}
+                </div>
                 <div className="text-[10px] text-slate-400">
-                  Field Weakening: {telemetry.specs.cornerSpeedRpm} RPM
+                  FW @ {activeSubPanel === 'motor' ? unitMotor.cornerSpeedRpm : telemetry.specs.cornerSpeedRpm} RPM
                 </div>
               </div>
 
               <div className="p-2.5 rounded bg-slate-950 border border-slate-800">
-                <div className="text-[10px] text-slate-400">Efficienza Sistema & Consumo:</div>
-                <div className="text-emerald-300 font-bold text-sm">
-                  {telemetry.thermalEfficiencyPercent}% • {telemetry.specs.efficiencyKwhPer100Km}{' '}
-                  kWh/100km
-                </div>
-                <div className="text-[10px] text-slate-400">
-                  {telemetry.specs.efficiencyWhPerKm} Wh/km • Autonomia EV:{' '}
-                  {telemetry.specs.estimatedRangeKm} km
-                </div>
-              </div>
-
-              <div className="p-2.5 rounded bg-slate-950 border border-slate-800">
-                <div className="text-[10px] text-slate-400">Peso Totale Powertrain:</div>
+                <div className="text-[10px] text-slate-400">Peso Totale:</div>
                 <div className="text-slate-100 font-bold text-sm">
-                  {telemetry.wetWeightKg} kg (Secco: {telemetry.dryWeightKg} kg)
+                  {activeSubPanel === 'motor'
+                    ? `${unitMotor.wetWeightKg} kg (Secco: ${unitMotor.dryWeightKg} kg)`
+                    : activeSubPanel === 'battery'
+                      ? `${batteryPack.weightKg} kg (Pacco)`
+                      : `${telemetry.wetWeightKg} kg (Secco: ${telemetry.dryWeightKg} kg)`}
                 </div>
                 <div className="text-[10px] text-slate-400">
-                  Batt: {telemetry.specs.batteryWeightKg} kg • E-Mot:{' '}
-                  {telemetry.specs.motorWeightKg} kg
-                  {systemSpec.hasIceEngine ? ` • ICE: ${selectedCoupledIce.wetWeightKg} kg` : ''}
+                  {activeSubPanel === 'motor'
+                    ? `Fluidi: +${(unitMotor.wetWeightKg - unitMotor.dryWeightKg).toFixed(1)} kg (${config.coolingSystem === 'Air' ? 'olio riduttore' : 'olio + camicia'})`
+                    : activeSubPanel === 'battery'
+                      ? `${batterySpec.cellDensityWhPerKg} Wh/kg cella`
+                      : `Batt: ${telemetry.specs.batteryWeightKg} kg • Mot: ${telemetry.specs.motorWeightKg} kg`}
                 </div>
               </div>
 
               <div className="p-2.5 rounded bg-slate-950 border border-slate-800">
-                <div className="text-[10px] text-slate-400">
-                  Affidabilità Dinamica (58%–94%):
+                <div className="text-[10px] text-slate-400">Efficienza / Consumo:</div>
+                <div className="text-emerald-300 font-bold text-sm">
+                  {activeSubPanel === 'motor'
+                    ? `${unitMotor.efficiencyPercent}%`
+                    : `${telemetry.thermalEfficiencyPercent}% • ${telemetry.specs.efficiencyKwhPer100Km} kWh/100km`}
                 </div>
+                <div className="text-[10px] text-slate-400">
+                  {activeSubPanel === 'motor'
+                    ? `Inverter ${unitMotor.inverterEfficiencyPercent}%`
+                    : `Autonomia EV: ${telemetry.specs.estimatedRangeKm} km`}
+                </div>
+              </div>
+
+              <div className="p-2.5 rounded bg-slate-950 border border-slate-800">
+                <div className="text-[10px] text-slate-400">Affidabilità Dinamica:</div>
                 <div
                   className={`font-bold text-sm ${
-                    telemetry.reliabilityPercent >= 82
+                    (activeSubPanel === 'motor' ? unitMotor.reliabilityPercent : telemetry.reliabilityPercent) >= 82
                       ? 'text-emerald-400'
-                      : telemetry.reliabilityPercent >= 70
+                      : (activeSubPanel === 'motor' ? unitMotor.reliabilityPercent : telemetry.reliabilityPercent) >= 70
                         ? 'text-amber-400'
                         : 'text-red-400'
                   }`}
                 >
-                  {telemetry.reliabilityPercent}%
+                  {activeSubPanel === 'motor' ? unitMotor.reliabilityPercent : telemetry.reliabilityPercent}%
                 </div>
                 <div className="text-[10px] text-slate-400">
-                  Scarica: {telemetry.specs.cRatePeak}C • Raffr. {config.coolingSystem}
+                  Raffr. {config.coolingSystem}
                 </div>
               </div>
 
               <div className="p-2.5 rounded bg-slate-950 border border-slate-800">
-                <div className="text-[10px] text-slate-400">
-                  Durata Stimata Reale (75–80% SoH):
-                </div>
+                <div className="text-[10px] text-slate-400">Durata Stimata Reale:</div>
                 <div className="text-sky-300 font-bold text-sm">
-                  {telemetry.estimatedLifespanKm.toLocaleString('it-IT')} km
+                  {activeSubPanel === 'motor'
+                    ? `${(unitMotor.estimatedLifespanKm / 1000).toFixed(0)}k km`
+                    : `${telemetry.estimatedLifespanKm.toLocaleString('it-IT')} km`}
                 </div>
                 <div className="text-[10px] text-slate-400">
-                  Classe {config.referenceClass} • Chimica {batterySpec.id}
+                  Classe {config.referenceClass}
                 </div>
               </div>
 
               <div className="p-2.5 rounded bg-slate-950 border border-slate-800">
-                <div className="text-[10px] text-slate-400">Emissioni CO2 Omologate:</div>
+                <div className="text-[10px] text-slate-400">Costo Unitario Produzione:</div>
+                <div className="text-amber-300 font-bold text-sm">
+                  ${activeSubPanel === 'motor'
+                    ? unitMotor.unitProductionCost.toLocaleString('it-IT')
+                    : activeSubPanel === 'battery'
+                      ? batteryPack.unitProductionCost.toLocaleString('it-IT')
+                      : telemetry.unitProductionCost.toLocaleString('it-IT')}
+                </div>
+                <div className="text-[10px] text-slate-400">
+                  {activeSubPanel === 'motor'
+                    ? 'Hardware + Inverter'
+                    : activeSubPanel === 'battery'
+                      ? `Celle + BMS ($${batteryPack.costPerKwh}/kWh)`
+                      : `Batt. $${costs.batteryCost.toLocaleString('it-IT')} + Mot. $${costs.motorSystemCost.toLocaleString('it-IT')}`}
+                </div>
+              </div>
+
+              <div className="p-2.5 rounded bg-slate-950 border border-slate-800">
+                <div className="text-[10px] text-slate-400">Emissioni CO2:</div>
                 <div
                   className={`font-bold text-sm ${
                     telemetry.emissionsGPerKm <= currentLegalEmissionLimit
@@ -2115,17 +2539,6 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
                 </div>
                 <div className="text-[10px] text-slate-400">
                   Soglia {currentYear}: {currentLegalEmissionLimit} g/km
-                </div>
-              </div>
-
-              <div className="p-2.5 rounded bg-slate-950 border border-slate-800">
-                <div className="text-[10px] text-slate-400">Costo Produzione Unitario:</div>
-                <div className="text-amber-300 font-bold text-sm">
-                  ${telemetry.unitProductionCost.toLocaleString('it-IT')}
-                </div>
-                <div className="text-[10px] text-slate-400">
-                  Pacco Batt.: ${costs.batteryCost.toLocaleString('it-IT')} (
-                  {batterySpec.costPerKwh} $/kWh)
                 </div>
               </div>
             </div>

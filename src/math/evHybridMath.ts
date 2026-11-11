@@ -278,8 +278,9 @@ export function calculateSingleElectricMotorMetrics(
     REFERENCE_CLASS_EV_SPECS[spec.referenceClass] ?? REFERENCE_CLASS_EV_SPECS.Normale;
 
   // 1. Geometria attiva statore/rotore (Ds in mm, Lr in mm -> volume in cm³ / cc):
-  const Ds = Math.max(140, Math.min(360, spec.statorDiameterMm));
-  const Lr = Math.max(70, Math.min(300, spec.rotorLengthMm));
+  // Rimosso il blocco Math.min: le dimensioni e il peso salgono senza alcun tetto fisso
+  const Ds = Math.max(120, spec.statorDiameterMm);
+  const Lr = Math.max(50, spec.rotorLengthMm);
   const statorVolumeCc = Math.round(Math.PI * Math.pow(Ds / 20, 2) * (Lr / 10));
 
   const isAxialFlux = spec.electricMotorType === 'AxialFlux';
@@ -365,11 +366,25 @@ export function calculateSingleElectricMotorMetrics(
   }
 
   // 4. Peso, Efficienza, Affidabilità e Durata della singola unità motore:
-  const motorCoreKg =
-    (22 + peakPowerKw * 0.21) * motorTypeSpec.weightMultiplier;
-  const inverterKg = spec.priceTier === 'Lusso' ? 5.5 : 9.0;
-  const dryWeightKg = Math.max(18, Math.round(motorCoreKg + inverterKg));
-  const wetWeightKg = Math.round(dryWeightKg + coolingSpec.weightKg * 0.45);
+  // Il peso sale in modo continuo e strettamente proporzionale al volume cilindrico statore/rotore,
+  // senza alcun clamp fisso (Math.min) al tetto massimo.
+  const activeCoreKg =
+    ((statorVolumeCc / 1000) * 4.35 + peakPowerKw * 0.04) *
+    motorTypeSpec.weightMultiplier;
+  const housingAndShaftKg =
+    (6.0 + (statorVolumeCc / 1000) * 0.85) * motorTypeSpec.weightMultiplier;
+  const inverterKg = spec.priceTier === 'Lusso' ? 5.5 : 8.5;
+  const dryWeightKg = Math.max(12, Math.round(activeCoreKg + housingAndShaftKg + inverterKg));
+
+  // Fluidi della singola unità motore (olio riduttore + fluido camicia statore):
+  // +1.2 kg (solo olio ingranaggi riduttore) se raffreddamento ad Aria Passiva;
+  // Tra +2.5 kg e +4.0 kg (olio riduttore + liquido camicia in base alle dimensioni) se a Liquido o Immersione
+  const sizeRatio = Math.max(0, Math.min(1, (statorVolumeCc - 2000) / 22000));
+  const motorFluidsKg =
+    spec.coolingSystem === 'Air'
+      ? 1.2
+      : Number((2.5 + sizeRatio * 1.5).toFixed(1));
+  const wetWeightKg = Number((dryWeightKg + motorFluidsKg).toFixed(1));
 
   const efficiencyPercent = Number(
     Math.min(
@@ -1107,9 +1122,13 @@ export function calculateElectricHybridCosts(
 
   // 2. Costo Motori Elettrici (esattamente proporzionale al numero di motori: 1x, 2x, 3x, 4x;
   // zero dipendenza da posizionamento Anteriore/Posteriore o orientamento Trasversale/Longitudinale):
+  // Se ASM: spegnimento elettronico a costo $0.
+  // Se PSM / IPM-SynRM / Flusso Assiale: Unità di Sgancio Meccanico Dog-Clutch costa +$350.
+  const isAsm = bench.motor.electricMotorType === 'InductionAsync';
+  const hasDisconnectActive =
+    !isAsm && Boolean(bench.hasFrontDisconnect) && motorCount >= 2;
   const mechanicalShaftAddonCost = hasMechanicalAwdShaft ? 650 : 0;
-  const disconnectAddonCost =
-    bench.hasFrontDisconnect && motorCount >= 2 ? 320 : 0;
+  const disconnectAddonCost = hasDisconnectActive ? 350 : 0;
 
   const motorSystemCost = Math.round(
     unitMotor.motorHardwareCost * motorCount +
@@ -1201,9 +1220,6 @@ export function simulateElectricHybridDyno(
   const batteryChemSpec =
     BATTERY_CHEMISTRIES.find((b) => b.id === bench.battery.batteryChemistry) ??
     BATTERY_CHEMISTRIES[0];
-  const coolingSpec =
-    ELECTRIC_COOLING_SYSTEMS.find((c) => c.id === bench.motor.coolingSystem) ??
-    ELECTRIC_COOLING_SYSTEMS[1];
   const voltageSpec =
     VOLTAGE_ARCHITECTURES.find((v) => v.voltage === bench.motor.voltageArchitecture) ??
     VOLTAGE_ARCHITECTURES[0];
@@ -1307,51 +1323,83 @@ export function simulateElectricHybridDyno(
   }
 
   // 3. Pesi del Powertrain (kg):
+  // Se ASM: spegnimento elettronico a peso +0 kg.
+  // Se PSM / IPM-SynRM / Flusso Assiale: Unità di Sgancio Meccanico Dog-Clutch aggiunge +4.5 kg.
+  const isAsm = bench.motor.electricMotorType === 'InductionAsync';
+  const hasDisconnectActive =
+    !isAsm && Boolean(bench.hasFrontDisconnect) && motorCount >= 2;
+  const disconnectAddonWeightKg = hasDisconnectActive ? 4.5 : 0;
+  const mechanicalShaftWeightKg = hasMechanicalAwdShaft ? 18 : 0;
+
   const motorWeightKg = Math.round(
-    unitMotor.dryWeightKg * motorCount + layoutSpec.extraHardwareWeightKg,
+    unitMotor.dryWeightKg * motorCount +
+      mechanicalShaftWeightKg +
+      disconnectAddonWeightKg,
   );
   const batteryWeightKg = batteryPack.weightKg;
-  const electronicsAndThermalKg = Math.round(
-    voltageSpec.cableWeightKg +
-      coolingSpec.weightKg +
-      classSpec.extraStructuralWeightKg,
+  const electronicsWeightKg = Math.round(
+    voltageSpec.cableWeightKg + classSpec.extraStructuralWeightKg,
   );
 
   const iceDryWeightKg = coupledIce ? coupledIce.dryWeightKg : 0;
   const iceWetWeightKg = coupledIce ? coupledIce.wetWeightKg : 0;
 
   const dryWeightKg = Math.max(
-    45,
+    30,
     Math.round(
       motorWeightKg +
         batteryWeightKg +
-        Math.max(8, electronicsAndThermalKg - coolingSpec.weightKg) +
+        electronicsWeightKg +
         iceDryWeightKg,
     ),
   );
-  const wetWeightKg = Math.max(
-    52,
-    Math.round(motorWeightKg + batteryWeightKg + electronicsAndThermalKg + iceWetWeightKg),
+
+  // Fluidi totali reali (rimosso l'offset fisso di +24 kg):
+  // - Motore: (unitMotor.wetWeightKg - unitMotor.dryWeightKg) * motorCount (1.2 kg per aria, 2.5-4.0 kg per liquido)
+  // - Batteria: circuito chiller/raffreddamento (~2.5 kg se a liquido/immersione, 0 kg se aria)
+  // - Motore termico accoppiato (se ibrido): iceWetWeightKg - iceDryWeightKg
+  const motorFluidsTotalKg = Number(
+    ((unitMotor.wetWeightKg - unitMotor.dryWeightKg) * motorCount).toFixed(1),
   );
+  const batteryCoolantKg = bench.battery.coolingSystem === 'Air' ? 0 : 2.5;
+  const iceFluidsKg = Math.max(0, iceWetWeightKg - iceDryWeightKg);
+  const totalFluidsKg = Math.round(motorFluidsTotalKg + batteryCoolantKg + iceFluidsKg);
+  const wetWeightKg = dryWeightKg + totalFluidsKg;
 
   // 4. Efficienza del Sistema (%) e Consumi Energetici Reali (Wh/km e kWh/100km):
-  const hasLowDragFrontAxle =
-    motorTypeSpec.hasZeroDragWhenCoasting || Boolean(bench.hasFrontDisconnect);
+  // Se ASM o con Unità di Sgancio Meccanico attiva, eliminiamo il freno magnetico di trascinamento (-6-8% consumi).
+  const hasZeroDragFrontAxle = isAsm || hasDisconnectActive;
 
-  const drivetrainConsumptionMult = hasMechanicalAwdShaft
-    ? 1.087 // Penalità attrito albero di trasmissione meccanico AWD (-8% resa)
-    : layoutSpec.id === 'DualMotor_eAWD' && hasLowDragFrontAxle
-      ? layoutSpec.consumptionPenaltyWithDisconnect
-      : layoutSpec.id === 'TriMotor_TorqueVectoring' && hasLowDragFrontAxle
-        ? layoutSpec.consumptionPenaltyWithDisconnect
-        : layoutSpec.consumptionPenaltyMultiplier;
+  let drivetrainConsumptionMult = 1.0;
+  if (hasMechanicalAwdShaft) {
+    drivetrainConsumptionMult = 1.087; // Penalità attrito albero meccanico AWD (-8%)
+  } else if (motorCount === 2) {
+    drivetrainConsumptionMult = hasZeroDragFrontAxle ? 1.02 : 1.085; // Riduce consumi del ~6.5% eliminando il freno magnetico
+  } else if (motorCount === 3) {
+    drivetrainConsumptionMult = hasZeroDragFrontAxle ? 1.075 : 1.15; // Risparmio netto ~7%
+  } else if (motorCount === 4) {
+    drivetrainConsumptionMult = 1.16; // 4 riduttori e 4 inverter
+  } else if (bench.motorLayout === 'SingleMotor_FWD') {
+    drivetrainConsumptionMult = 1.015;
+  } else {
+    drivetrainConsumptionMult = 1.0;
+  }
+
+  const baseEfficiency = hasMechanicalAwdShaft
+    ? 85.1
+    : motorCount === 1
+      ? (bench.motorLayout === 'SingleMotor_FWD' ? 90.5 : 92.0)
+      : motorCount === 2
+        ? (hasZeroDragFrontAxle ? 89.5 : 88.0)
+        : motorCount === 3
+          ? (hasZeroDragFrontAxle ? 86.8 : 85.0)
+          : 83.5;
 
   const rawSystemEfficiency =
-    (hasMechanicalAwdShaft ? 85.1 : layoutSpec.baseSystemEfficiencyPercent) *
+    baseEfficiency *
       (motorTypeSpec.baseEfficiencyPercent / 95.5) *
       (tierSpec.inverterEfficiencyPercent / 93.5) +
-    voltageSpec.efficiencyBonusPercent * 0.5 +
-    (layoutSpec.id === 'DualMotor_eAWD' && hasLowDragFrontAxle ? 2.1 : 0);
+    voltageSpec.efficiencyBonusPercent * 0.5;
 
   const systemEfficiencyPercent = Number(
     Math.min(96.5, Math.max(78.0, rawSystemEfficiency)).toFixed(1),
