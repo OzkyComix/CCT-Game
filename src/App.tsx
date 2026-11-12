@@ -35,6 +35,7 @@ export const App: React.FC = () => {
     advanceMonth,
     setHistoricalYear,
     toggleComponentB2B,
+    startVariant,
   } = useGameStore();
 
   const [activeSection, setActiveSection] = useState<ActiveSection>('engine-lab-1a');
@@ -266,21 +267,57 @@ export const App: React.FC = () => {
                     <span>3. Motori</span>
                     <span>({engines.length})</span>
                   </div>
-                  {engines.map((en) => (
-                    <div
-                      key={en.id}
-                      className="p-2 rounded bg-slate-900 border border-slate-800 space-y-1"
-                    >
-                      <div className="font-bold text-slate-100">{en.name}</div>
-                      <div className="text-[11px] text-slate-400">
-                        LWH: {en.dimensionsMm.lengthMm}×{en.dimensionsMm.widthMm}×
-                        {en.dimensionsMm.heightMm}mm
+                  <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                    {engines.map((en) => (
+                      <div
+                        key={en.id}
+                        className="p-2 rounded bg-slate-900 border border-slate-800 space-y-1 text-xs font-mono"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-slate-100">{en.name}</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30">
+                            {en.codeName}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-400">
+                          LWH: {en.dimensionsMm.lengthMm}×{en.dimensionsMm.widthMm}×{en.dimensionsMm.heightMm}mm
+                        </div>
+                        <div className="text-[11px] text-emerald-300">
+                          {en.telemetry.peakPowerHp} CV / {en.telemetry.peakTorqueNm} Nm
+                        </div>
+                        {en.isVariant && (
+                          <div className="text-[10px] text-amber-400 font-semibold">
+                            ↳ Variante da {en.parentEngineName || 'Progetto Base'} (-{en.variantRdSavingsPercent ?? 0}% R&D)
+                          </div>
+                        )}
+                        <div className="pt-1 border-t border-slate-800 flex justify-end">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const targetSection: ActiveSection =
+                                en.propulsionType === 'Wankel_1B'
+                                  ? 'engine-lab-1b'
+                                  : en.propulsionType === 'ElectricHybrid_1C'
+                                    ? 'engine-lab-1c'
+                                    : 'engine-lab-1a';
+                              startVariant({
+                                type: en.propulsionType === 'Wankel_1B' ? 'wankel' : 'piston',
+                                id: en.id,
+                                name: en.name,
+                                codeName: en.codeName,
+                                entity: en,
+                              });
+                              setActiveSection(targetSection);
+                              window.scrollTo({ top: 0, behavior: 'smooth' });
+                            }}
+                            className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-[10px] font-bold cursor-pointer"
+                          >
+                            Crea Variante / Evo
+                          </button>
+                        </div>
                       </div>
-                      <div className="text-[11px] text-emerald-300">
-                        {en.telemetry.peakPowerHp} CV / {en.telemetry.peakTorqueNm} Nm
-                      </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
 
                 {/* 4. Componenti */}

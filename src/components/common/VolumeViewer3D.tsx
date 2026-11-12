@@ -12,6 +12,7 @@ import {
 import type {
   DimensionsLWH,
   ElectricHybridEngineConfigInput,
+  EngineOrientation,
 } from '../../types/gameTypes';
 
 export interface OverlaidChassisBayItem {
@@ -34,6 +35,8 @@ interface VolumeViewer3DProps {
   wankelConfig?: WankelEngineConfigInput;
   /** Configurazione opzionale del powertrain elettrico/ibrido 1C */
   electricConfig?: ElectricHybridEngineConfigInput;
+  /** Orientamento nel vano per visualizzazione o compatibilità */
+  intendedOrientation?: EngineOrientation;
   /** Tipo di propulsore per scegliere il modello procedurale ('Piston' | 'Wankel' | 'ElectricHybrid') */
   engineType?: 'Piston' | 'Wankel' | 'ElectricHybrid';
   /** Lista di pianali selezionati con checkbox per la sovrapposizione simultanea 3D */
@@ -736,6 +739,7 @@ export const VolumeViewer3D: React.FC<VolumeViewer3DProps> = ({
   engineConfig,
   wankelConfig,
   electricConfig,
+  intendedOrientation,
   engineType = 'Piston',
   overlaidChassisBays,
 }) => {
@@ -758,6 +762,13 @@ export const VolumeViewer3D: React.FC<VolumeViewer3DProps> = ({
   const lastMouseRef = useRef({ x: 0, y: 0 });
 
   const anyCollision = overlaidChassisBays.some((b) => !b.isCompatible);
+
+  const effectiveOrientation: EngineOrientation =
+    intendedOrientation ||
+    (engineType === 'Wankel'
+      ? wankelConfig?.intendedOrientation
+      : engineConfig?.intendedOrientation) ||
+    'Longitudinale';
 
   // 1. Inizializzazione unica della scena Three.js (non resetta mai la rotazione quando muovi gli slider!)
   useEffect(() => {
@@ -945,6 +956,14 @@ export const VolumeViewer3D: React.FC<VolumeViewer3DProps> = ({
       } else {
         procGroup = new THREE.Group();
       }
+
+      // Rotazione visiva reale di 90 gradi sull'asse Y per orientamento Trasversale
+      if (effectiveOrientation === 'Trasversale') {
+        procGroup.rotation.y = Math.PI / 2;
+      } else {
+        procGroup.rotation.y = 0;
+      }
+
       sc.engineContainer.add(procGroup);
 
       const envGeo = new THREE.BoxGeometry(
@@ -1113,13 +1132,12 @@ export const VolumeViewer3D: React.FC<VolumeViewer3DProps> = ({
         {/* Overlay Info Ingombri L / W / H nel Vano */}
         <div className="absolute top-2.5 left-3 right-3 flex flex-wrap items-center justify-between gap-2 pointer-events-none text-[11px] font-mono">
           <span className="px-2 py-0.5 rounded bg-slate-900/90 border border-slate-700 text-slate-200">
-            Nel Vano (
-            {wankelConfig
-              ? wankelConfig.intendedOrientation
-              : (engineConfig?.intendedOrientation ?? 'Longitudinale')}
-            ): L={engineInBayDimensionsMm.lengthMm}mm • W=
-            {engineInBayDimensionsMm.widthMm}mm • H=
-            {engineInBayDimensionsMm.heightMm}mm
+            {engineType === 'ElectricHybrid' &&
+            (electricConfig?.systemType === 'PureEV' || !electricConfig?.coupledIceOptionId)
+              ? `Ingombro E-Motor: L=${engineInBayDimensionsMm.lengthMm}mm • W=${engineInBayDimensionsMm.widthMm}mm • H=${engineInBayDimensionsMm.heightMm}mm`
+              : effectiveOrientation === 'Trasversale'
+                ? `Nel Vano (Trasversale - Ruotato 90°): L=${engineInBayDimensionsMm.lengthMm}mm (Fronte-Retro) • W=${engineInBayDimensionsMm.widthMm}mm (Passaruota) • H=${engineInBayDimensionsMm.heightMm}mm`
+                : `Nel Vano (Longitudinale): L=${engineInBayDimensionsMm.lengthMm}mm • W=${engineInBayDimensionsMm.widthMm}mm • H=${engineInBayDimensionsMm.heightMm}mm`}
           </span>
           <span className="px-2 py-0.5 rounded bg-slate-900/90 border border-slate-700 text-amber-300">
             Pianali Sovrapposti: {overlaidChassisBays.length}

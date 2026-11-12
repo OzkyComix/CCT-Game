@@ -1,14 +1,23 @@
 import type {
   BatteryChemistry,
+  BatteryPackStructure,
+  BenchElectricMotorCount,
+  BmsCalibrationProfile,
   CoupledIceEngineOption,
   DualCurrencyCost,
   ElectricCoolingSystem,
   ElectricMotorType,
   HybridSystemType,
+  InverterPowerElectronicsType,
   InverterTech,
+  MotorHousingType,
   MotorLayoutConfig,
   PriceTier,
   ReferenceClass,
+  RotorMagnetMaterialType,
+  RotorSleeveBearingType,
+  StatorWindingType,
+  UnderbodyShieldType,
   VoltageArchitecture,
 } from '../types/gameTypes';
 
@@ -715,6 +724,610 @@ export const INVERTER_TECHNOLOGIES: InverterTechSpec[] = [
   },
 ];
 
+// ============================================================================
+// COMPONENTISTICA FISICA REALE (MOTORE ELETTRICO & PACCO BATTERIA)
+// ============================================================================
+
+export interface StatorWindingSpec {
+  id: StatorWindingType;
+  name: string;
+  shortName: string;
+  powerMultiplier: number;
+  torqueMultiplier: number;
+  highRpmPowerMultiplier: number;
+  cost: number;
+  rdCost: number;
+  weightDeltaKg: number;
+  efficiencyBonusPercent: number;
+  reliabilityDeltaPercent: number;
+  description: string;
+}
+
+export const STATOR_WINDING_SPECS: StatorWindingSpec[] = [
+  {
+    id: 'RoundWireStandard',
+    name: 'Filo Tondo Standard (Riempimento 45%)',
+    shortName: 'Filo Tondo 45%',
+    powerMultiplier: 0.92, // -8% CV
+    torqueMultiplier: 0.92, // -8% Nm
+    highRpmPowerMultiplier: 0.90,
+    cost: 0,
+    rdCost: 0,
+    weightDeltaKg: 0,
+    efficiencyBonusPercent: -0.8,
+    reliabilityDeltaPercent: 0,
+    description: 'Economico e base (-8% CV/Nm): riempimento cava limitato (45%) e dissipazione termica standard.',
+  },
+  {
+    id: 'HairpinFlat',
+    name: 'Barre Piatte Hairpin (Riempimento 70%)',
+    shortName: 'Hairpin 70%',
+    powerMultiplier: 1.06, // +6% CV
+    torqueMultiplier: 1.06, // +6% Nm
+    highRpmPowerMultiplier: 1.06,
+    cost: 280,
+    rdCost: 45,
+    weightDeltaKg: -2.0,
+    efficiencyBonusPercent: +1.2,
+    reliabilityDeltaPercent: +4,
+    description: 'Costo medio (+6% CV/Nm): barre rettangolari a forcina, riempimento cava 70% e migliore dissipazione.',
+  },
+  {
+    id: 'HairpinContinuousMultiLayer',
+    name: 'Hairpin Continuo Multi-Strato',
+    shortName: 'Hairpin Multi-Strato',
+    powerMultiplier: 1.12, // +12% CV
+    torqueMultiplier: 1.12, // +12% Nm
+    highRpmPowerMultiplier: 1.14,
+    cost: 650,
+    rdCost: 95,
+    weightDeltaKg: -3.5,
+    efficiencyBonusPercent: +2.2,
+    reliabilityDeltaPercent: +6,
+    description: 'Costo alto (+12% CV/Nm): avvolgimento continuo multi-strato privo di saldature di testa, massima efficienza.',
+  },
+  {
+    id: 'LitzRacingWire',
+    name: 'Filo Litz / Rame Puro Racing',
+    shortName: 'Filo Litz Racing',
+    powerMultiplier: 1.18, // +18% CV agli alti regimi
+    torqueMultiplier: 1.10, // +10% Nm
+    highRpmPowerMultiplier: 1.25,
+    cost: 1450,
+    rdCost: 210,
+    weightDeltaKg: -5.0,
+    efficiencyBonusPercent: +3.0,
+    reliabilityDeltaPercent: +8,
+    description: 'Costo altissimo (+18% CV agli alti regimi): trefoli isolati singolarmente, minime perdite per effetto pelle oltre 18.000 RPM.',
+  },
+];
+
+export interface InverterPowerElectronicsSpec {
+  id: InverterPowerElectronicsType;
+  name: string;
+  shortName: string;
+  mappedInverterTech: InverterTech;
+  efficiencyPercent: number;
+  powerMultiplier: number;
+  torqueMultiplier: number;
+  cost: number;
+  rdCost: number;
+  weightDeltaKg: number;
+  reliabilityDeltaPercent: number;
+  description: string;
+}
+
+export const INVERTER_POWER_ELECTRONICS_SPECS: InverterPowerElectronicsSpec[] = [
+  {
+    id: 'Silicon_IGBT',
+    name: 'Inverter IGBT al Silicio (Economico)',
+    shortName: 'IGBT Silicio (88%)',
+    mappedInverterTech: 'Silicon_IGBT',
+    efficiencyPercent: 88.0,
+    powerMultiplier: 0.90, // -10% CV
+    torqueMultiplier: 0.90, // -10% Nm
+    cost: 180,
+    rdCost: 0,
+    weightDeltaKg: +6.0,
+    reliabilityDeltaPercent: 0,
+    description: 'Basso costo, efficienza 88%, -10% potenza/coppia di picco e radiatore termico maggiorato (+6 kg).',
+  },
+  {
+    id: 'Silicon_MOSFET',
+    name: 'Inverter MOSFET Silicio Avanzato',
+    shortName: 'MOSFET Silicio (93%)',
+    mappedInverterTech: 'Silicon_IGBT',
+    efficiencyPercent: 93.0,
+    powerMultiplier: 1.0,
+    torqueMultiplier: 1.0,
+    cost: 420,
+    rdCost: 40,
+    weightDeltaKg: 0,
+    reliabilityDeltaPercent: +3,
+    description: 'Costo medio, efficienza 93%, erogazione e potenza base 1.0x equilibrata.',
+  },
+  {
+    id: 'SiliconCarbide_SiC',
+    name: 'Inverter Carburo di Silicio (SiC MOSFET)',
+    shortName: 'SiC MOSFET (97.5%)',
+    mappedInverterTech: 'SiliconCarbide_SiC',
+    efficiencyPercent: 97.5,
+    powerMultiplier: 1.14, // +14% CV/Nm
+    torqueMultiplier: 1.14,
+    cost: 950,
+    rdCost: 110,
+    weightDeltaKg: -4.0,
+    reliabilityDeltaPercent: +8,
+    description: 'Costo elevato, efficienza 97.5%, +14% CV/Nm, basse perdite di commutazione e minore calore.',
+  },
+  {
+    id: 'Dual_SiC_GaN_Racing',
+    name: 'Dual-Inverter SiC / GaN Alta Corrente (Corsa)',
+    shortName: 'Dual SiC/GaN Corsa (98.5%)',
+    mappedInverterTech: 'GalliumNitride_GaN',
+    efficiencyPercent: 98.5,
+    powerMultiplier: 1.28, // +28% CV/Nm
+    torqueMultiplier: 1.28,
+    cost: 2400,
+    rdCost: 260,
+    weightDeltaKg: -6.0,
+    reliabilityDeltaPercent: -4,
+    description: 'Costo estremo, efficienza 98.5%, +28% CV/Nm di picco; correnti di fase enormi e stress termico superiore.',
+  },
+];
+
+export interface RotorSleeveBearingSpec {
+  id: RotorSleeveBearingType;
+  name: string;
+  shortName: string;
+  maxSafeRpm: number;
+  cost: number;
+  rdCost: number;
+  weightDeltaKg: number;
+  reliabilityDeltaPercent: number;
+  description: string;
+}
+
+export const ROTOR_SLEEVE_BEARING_SPECS: RotorSleeveBearingSpec[] = [
+  {
+    id: 'SteelLaminationStandard',
+    name: 'Lamierini Acciaio + Cuscinetti Acciaio Standard',
+    shortName: 'Acciaio Std (14k RPM)',
+    maxSafeRpm: 14000,
+    cost: 0,
+    rdCost: 0,
+    weightDeltaKg: 0,
+    reliabilityDeltaPercent: 0,
+    description: 'Economico: lamierini convenzionali e cuscinetti a sfere in acciaio, limitato a 14.000 RPM.',
+  },
+  {
+    id: 'InconelSleeveHybrid',
+    name: 'Camicia Inconel + Cuscinetti Ibridi',
+    shortName: 'Inconel Ibridi (18k RPM)',
+    maxSafeRpm: 18000,
+    cost: 380,
+    rdCost: 50,
+    weightDeltaKg: -1.5,
+    reliabilityDeltaPercent: +6,
+    description: 'Costo medio: camicia in lega Inconel, permette fino a 18.000 RPM con maggiore affidabilità.',
+  },
+  {
+    id: 'CarbonPrepregCeramic',
+    name: 'Camicia in Fibra di Carbonio Pre-Preg + Cuscinetti Ceramici Si3N4',
+    shortName: 'Carbonio + Si3N4 (24k RPM)',
+    maxSafeRpm: 24000,
+    cost: 1150,
+    rdCost: 160,
+    weightDeltaKg: -5.0,
+    reliabilityDeltaPercent: +10,
+    description: 'Costo molto alto: rotore fasciato in carbonio pre-preg, permette fino a 24.000 RPM senza cedimento centrifugo (-attriti, -peso).',
+  },
+];
+
+export interface RotorMagnetMaterialSpec {
+  id: RotorMagnetMaterialType;
+  name: string;
+  shortName: string;
+  torqueMultiplier: number;
+  powerMultiplier: number;
+  cost: number;
+  rdCost: number;
+  weightDeltaKg: number;
+  thermalDemagnetizationResistance: string;
+  description: string;
+}
+
+export const ROTOR_MAGNET_MATERIAL_SPECS: RotorMagnetMaterialSpec[] = [
+  {
+    id: 'FerriteStandardCage',
+    name: 'Ferrite / Gabbia Alluminio Standard',
+    shortName: 'Ferrite (No Terre Rare)',
+    torqueMultiplier: 0.85, // -15%
+    powerMultiplier: 0.85,
+    cost: -250,
+    rdCost: 0,
+    weightDeltaKg: +4.0,
+    thermalDemagnetizationResistance: 'Standard',
+    description: 'Molto economico, zero terre rare, -15% coppia/potenza ma totale indipendenza dalle fluttuazioni di mercato.',
+  },
+  {
+    id: 'NeodymiumNdFeB',
+    name: 'Neodimio Standard (NdFeB N42)',
+    shortName: 'Neodimio N42',
+    torqueMultiplier: 1.0,
+    powerMultiplier: 1.0,
+    cost: 0,
+    rdCost: 30,
+    weightDeltaKg: 0,
+    thermalDemagnetizationResistance: 'Buona (fino a 120°C)',
+    description: 'Costo medio, coppia e potenza 1.0x standard per motori elettrici stradali.',
+  },
+  {
+    id: 'NeodymiumDyUH',
+    name: 'Neodimio-Disprosio Alta Temperatura (NdFeB-UH 200°C)',
+    shortName: 'NdFeB-UH 200°C',
+    torqueMultiplier: 1.10, // +10%
+    powerMultiplier: 1.06,
+    cost: 520,
+    rdCost: 80,
+    weightDeltaKg: -1.0,
+    thermalDemagnetizationResistance: 'Superiore (fino a 200°C)',
+    description: 'Costo alto (+10% coppia): additivato con Disprosio, resiste al surriscaldamento fino a 200°C senza smagnetizzarsi.',
+  },
+  {
+    id: 'SamariumCobaltRacing',
+    name: 'Samario-Cobalto (SmCo) / Leghe Permendur Racing',
+    shortName: 'SmCo / Permendur',
+    torqueMultiplier: 1.18, // +18%
+    powerMultiplier: 1.18,
+    cost: 1350,
+    rdCost: 190,
+    weightDeltaKg: -2.5,
+    thermalDemagnetizationResistance: 'Estrema (oltre 300°C)',
+    description: 'Costo estremo (+18% coppia/potenza continua): stabilità magnetica totale anche sotto stress estremo prolungato in pista.',
+  },
+];
+
+export interface MotorHousingSpec {
+  id: MotorHousingType;
+  name: string;
+  shortName: string;
+  cost: number;
+  rdCost: number;
+  weightDeltaKg: number;
+  nvhComfortScore: number;
+  reliabilityDeltaPercent: number;
+  description: string;
+}
+
+export const MOTOR_HOUSING_SPECS: MotorHousingSpec[] = [
+  {
+    id: 'DieCastAluminum',
+    name: 'Alluminio Pressofuso Standard',
+    shortName: 'Alluminio Std',
+    cost: 0,
+    rdCost: 0,
+    weightDeltaKg: 0,
+    nvhComfortScore: 0,
+    reliabilityDeltaPercent: 0,
+    description: 'Carcassa strutturale standard in alluminio pressofuso: solida, economica e affidabile.',
+  },
+  {
+    id: 'AcousticDampedActiveNVH',
+    name: 'Carcassa Silenziata con Supporti Attivi NVH',
+    shortName: 'NVH Silenziata (+4 kg)',
+    cost: 450,
+    rdCost: 60,
+    weightDeltaKg: +4.0,
+    nvhComfortScore: +15,
+    reliabilityDeltaPercent: +5,
+    description: '+4 kg, +costo: azzera il fischio dell’inverter per berline di lusso e comfort, riducendo le micro-vibrazioni (+durata).',
+  },
+  {
+    id: 'MagnesiumCarbonUltralight',
+    name: 'Magnesio e Carbonio Ultraleggero (Corsa)',
+    shortName: 'Magnesio-Carbonio (-22% peso)',
+    cost: 1100,
+    rdCost: 150,
+    weightDeltaKg: -7.5,
+    nvhComfortScore: -12,
+    reliabilityDeltaPercent: 0,
+    description: '-22% sul peso della carcassa, costo elevato: lega magnesio con flange in carbonio, zero insonorizzazione acustica.',
+  },
+  {
+    id: 'ArmoredSealedIP69K',
+    name: 'Carcassa Blindata Sigillata IP69K (Fuoristrada)',
+    shortName: 'Blindata IP69K (+12 kg)',
+    cost: 650,
+    rdCost: 75,
+    weightDeltaKg: +12.0,
+    nvhComfortScore: +5,
+    reliabilityDeltaPercent: +20,
+    description: '+12 kg, +costo: protezione totale da fango, sabbia, rocce e guadi profondi ad alta pressione (+affidabilità gravosa).',
+  },
+];
+
+export interface BatteryPackStructureSpec {
+  id: BatteryPackStructure;
+  name: string;
+  shortName: string;
+  weightMultiplier: number;
+  cost: number;
+  rdCost: number;
+  description: string;
+}
+
+export const BATTERY_PACK_STRUCTURE_SPECS: BatteryPackStructureSpec[] = [
+  {
+    id: 'ModularAluminum',
+    name: 'Moduli Standard con Busbar in Alluminio',
+    shortName: 'Modulare Alluminio',
+    weightMultiplier: 1.12, // +12% peso involucro
+    cost: 0,
+    rdCost: 0,
+    description: 'Economico e modulare: scomparti sostituibili per facilitare la riparazione ma con peso strutturale maggiore.',
+  },
+  {
+    id: 'CellToPackCopper',
+    name: 'Cell-to-Pack (CTP) con Busbar in Rame',
+    shortName: 'CTP Rame (-8% peso)',
+    weightMultiplier: 0.92, // -8% peso
+    cost: 850,
+    rdCost: 60,
+    description: 'Costo medio (-8% peso strutturale): elimina i telai dei moduli singoli, integrando le celle con busbar in rame.',
+  },
+  {
+    id: 'CellToChassisCTC',
+    name: 'Cell-to-Chassis Strutturale (CTC)',
+    shortName: 'CTC Strutturale (-15% peso)',
+    weightMultiplier: 0.85, // -15% peso
+    cost: 2200,
+    rdCost: 160,
+    description: 'Premium (-15% peso): il pacco batteria funge da pianale strutturale dell’auto, elevatissima rigidità torsionale.',
+  },
+  {
+    id: 'CarbonLaserSilverBusbar',
+    name: 'Guscio Monoscocca in Carbonio + Busbar Rame Argentato Laser (Corsa)',
+    shortName: 'Carbonio & Argento (-25% peso)',
+    weightMultiplier: 0.75, // -25% peso
+    cost: 5500,
+    rdCost: 320,
+    description: 'Costosissimo (-25% peso involucro): guscio in autoclave e busbar saldate al laser in rame argentato a minima resistenza.',
+  },
+];
+
+export interface BmsCalibrationSpec {
+  id: BmsCalibrationProfile;
+  name: string;
+  shortName: string;
+  bufferPercent: number;
+  maxCRateMultiplier: number;
+  lifespanMultiplier: number;
+  reliabilityDeltaPercent: number;
+  dischargePowerMultiplier: number;
+  description: string;
+}
+
+export const BMS_CALIBRATION_SPECS: BmsCalibrationSpec[] = [
+  {
+    id: 'ConservativeLongevity',
+    name: 'Conservativa / Longevità (Buffer 12% - Scarica 1.5C)',
+    shortName: 'Conservativa 1.5C',
+    bufferPercent: 12,
+    maxCRateMultiplier: 1.5,
+    lifespanMultiplier: 1.5,
+    reliabilityDeltaPercent: +15,
+    dischargePowerMultiplier: 0.85,
+    description: 'Massima durata e affidabilità (+15%): buffer 12%, scarica limitata a 1.5C per garantire oltre 500.000 km di vita.',
+  },
+  {
+    id: 'RoadBalanced',
+    name: 'Stradale Bilanciata (Buffer 8% - Scarica 3C)',
+    shortName: 'Bilanciata 3C',
+    bufferPercent: 8,
+    maxCRateMultiplier: 3.0,
+    lifespanMultiplier: 1.0,
+    reliabilityDeltaPercent: 0,
+    dischargePowerMultiplier: 1.0,
+    description: 'Standard: buffer 8% e scarica fino a 3C, equilibrio ottimale per auto stradali di serie.',
+  },
+  {
+    id: 'PerformanceSport',
+    name: 'Performance / Sport (Buffer 4% - Scarica 5C)',
+    shortName: 'Sport 5C (+20% kW)',
+    bufferPercent: 4,
+    maxCRateMultiplier: 5.0,
+    lifespanMultiplier: 0.85,
+    reliabilityDeltaPercent: -5,
+    dischargePowerMultiplier: 1.20,
+    description: '+20% potenza massima erogabile dalla batteria ai motori: buffer 4%, scarica fino a 5C (-15% durata km).',
+  },
+  {
+    id: 'RaceExtreme',
+    name: 'Qualifica / Corsa Estrema (Buffer 1% - Scarica 10C)',
+    shortName: 'Qualifica 10C (+45% kW)',
+    bufferPercent: 1,
+    maxCRateMultiplier: 10.0,
+    lifespanMultiplier: 0.50,
+    reliabilityDeltaPercent: -15,
+    dischargePowerMultiplier: 1.45,
+    description: '+45% potenza di picco scaricabile (fino a 10C): alimenta hypercar da 1000+ CV anche con batterie compatte, vita utile ridotta.',
+  },
+];
+
+export interface UnderbodyShieldSpec {
+  id: UnderbodyShieldType;
+  name: string;
+  shortName: string;
+  cost: number;
+  rdCost: number;
+  weightKg: number;
+  reliabilityDeltaPercent: number;
+  description: string;
+}
+
+export const UNDERBODY_SHIELD_SPECS: UnderbodyShieldSpec[] = [
+  {
+    id: 'StandardSteelShield',
+    name: 'Lamiera Standard',
+    shortName: 'Lamiera Std',
+    cost: 0,
+    rdCost: 0,
+    weightKg: 0,
+    reliabilityDeltaPercent: 0,
+    description: 'Protezione base in alluminio/acciaio stampato per uso stradale quotidiano.',
+  },
+  {
+    id: 'TitaniumKevlarIP69K',
+    name: 'Piastra Ballistica Titanio/Kevlar IP69K (Fuoristrada/Rally)',
+    shortName: 'Titanio/Kevlar (+18 kg)',
+    cost: 850,
+    rdCost: 45,
+    weightKg: 18,
+    reliabilityDeltaPercent: +22,
+    description: '+18 kg, +costo: piastra in composito di titanio e aramide Kevlar anti-sfondamento (+22% affidabilità su terreni sconnessi).',
+  },
+];
+
+export interface BenchMotorScalingSpec {
+  motorCount: BenchElectricMotorCount;
+  layoutId: MotorLayoutConfig;
+  name: string;
+  shortName: string;
+  badge: string;
+  multiplierLabel: string;
+  totalOutputMultiplier: number;
+  baseSystemEfficiencyPercent: number;
+  consumptionPenaltyMultiplier: number;
+  description: string;
+}
+
+export const BENCH_MOTOR_SCALING_CONFIGS: BenchMotorScalingSpec[] = [
+  {
+    motorCount: 1,
+    layoutId: 'SingleMotor_RWD',
+    name: '1x Singolo Motore (Scala 1.0x)',
+    shortName: '1x Singolo (1.0x)',
+    badge: '1× Motore',
+    multiplierLabel: '1.0×',
+    totalOutputMultiplier: 1.0,
+    baseSystemEfficiencyPercent: 92.5,
+    consumptionPenaltyMultiplier: 1.0,
+    description: 'Singola unità motrice universale diretta (scala 1.0× potenza e coppia). Massima efficienza, zero trascinamento secondario.',
+  },
+  {
+    motorCount: 2,
+    layoutId: 'DualMotor_eAWD',
+    name: '2x Dual-Motor (Scala 2.0x)',
+    shortName: '2x Dual-Motor (2.0x)',
+    badge: '2× Motori',
+    multiplierLabel: '2.0×',
+    totalOutputMultiplier: 2.0,
+    baseSystemEfficiencyPercent: 88.2,
+    consumptionPenaltyMultiplier: 1.085,
+    description: 'Doppia unità motrice (scala lineare esatta 2.0× potenza e coppia). Spegnimento secondario ASM $0 o Dog-Clutch.',
+  },
+  {
+    motorCount: 3,
+    layoutId: 'TriMotor_TorqueVectoring',
+    name: '3x Tri-Motor (Scala 3.0x)',
+    shortName: '3x Tri-Motor (3.0x)',
+    badge: '3× Motori',
+    multiplierLabel: '3.0×',
+    totalOutputMultiplier: 3.0,
+    baseSystemEfficiencyPercent: 85.5,
+    consumptionPenaltyMultiplier: 1.145,
+    description: 'Tre unità motrici con Torque Vectoring (scala lineare esatta 3.0× potenza e coppia).',
+  },
+  {
+    motorCount: 4,
+    layoutId: 'QuadMotor_Independent',
+    name: '4x Quad-Motor (Scala 4.0x)',
+    shortName: '4x Quad-Motor (4.0x)',
+    badge: '4× Motori',
+    multiplierLabel: '4.0×',
+    totalOutputMultiplier: 4.0,
+    baseSystemEfficiencyPercent: 83.8,
+    consumptionPenaltyMultiplier: 1.175,
+    description: 'Quattro unità motrici e quattro inverter indipendenti, 1 per ruota (scala lineare esatta 4.0× potenza e coppia).',
+  },
+];
+
+/**
+ * Deriva automaticamente PriceTier e ReferenceClass per un motore elettrico
+ * in base ai suoi componenti fisici interni.
+ */
+export function deriveElectricMotorTaxonomy(
+  statorWinding?: StatorWindingType,
+  inverter?: InverterPowerElectronicsType,
+  rotorSleeve?: RotorSleeveBearingType,
+  magnetMaterial?: RotorMagnetMaterialType,
+  housing?: MotorHousingType,
+): { priceTier: PriceTier; referenceClass: ReferenceClass } {
+  let referenceClass: ReferenceClass = 'Normale';
+  if (housing === 'ArmoredSealedIP69K') {
+    referenceClass = 'Fuoristrada';
+  } else if (housing === 'AcousticDampedActiveNVH') {
+    referenceClass = 'Comfort';
+  } else if (
+    rotorSleeve === 'CarbonPrepregCeramic' ||
+    inverter === 'Dual_SiC_GaN_Racing' ||
+    statorWinding === 'LitzRacingWire'
+  ) {
+    referenceClass = 'Corsa';
+  } else if (
+    statorWinding === 'HairpinContinuousMultiLayer' ||
+    inverter === 'SiliconCarbide_SiC' ||
+    magnetMaterial === 'NeodymiumDyUH' ||
+    magnetMaterial === 'SamariumCobaltRacing'
+  ) {
+    referenceClass = 'Sport';
+  }
+
+  let priceTier: PriceTier = 'Media';
+  if (inverter === 'Dual_SiC_GaN_Racing' || rotorSleeve === 'CarbonPrepregCeramic') {
+    priceTier = 'Lusso';
+  } else if (inverter === 'SiliconCarbide_SiC' || statorWinding === 'HairpinContinuousMultiLayer') {
+    priceTier = 'Premium';
+  } else if (inverter === 'Silicon_IGBT' && statorWinding === 'RoundWireStandard') {
+    priceTier = 'Economica';
+  }
+
+  return { priceTier, referenceClass };
+}
+
+/**
+ * Deriva automaticamente PriceTier e ReferenceClass per un pacco batteria
+ * in base alla sua architettura strutturale, BMS e protezione.
+ */
+export function deriveBatteryPackTaxonomy(
+  structure?: BatteryPackStructure,
+  bms?: BmsCalibrationProfile,
+  shield?: UnderbodyShieldType,
+): { priceTier: PriceTier; referenceClass: ReferenceClass } {
+  let referenceClass: ReferenceClass = 'Normale';
+  if (shield === 'TitaniumKevlarIP69K') {
+    referenceClass = 'Fuoristrada';
+  } else if (bms === 'RaceExtreme' || structure === 'CarbonLaserSilverBusbar') {
+    referenceClass = 'Corsa';
+  } else if (bms === 'PerformanceSport') {
+    referenceClass = 'Sport';
+  } else if (bms === 'ConservativeLongevity') {
+    referenceClass = 'Comfort';
+  }
+
+  let priceTier: PriceTier = 'Media';
+  if (structure === 'CarbonLaserSilverBusbar') {
+    priceTier = 'Lusso';
+  } else if (structure === 'CellToChassisCTC') {
+    priceTier = 'Premium';
+  } else if (structure === 'ModularAluminum' && bms === 'ConservativeLongevity') {
+    priceTier = 'Economica';
+  }
+
+  return { priceTier, referenceClass };
+}
+
 /**
  * Punto 6: 3 Motori di Riferimento Base sempre disponibili per il test dei sistemi Ibridi
  * (oltre al Motore a Pistoni attuale in Tab 1A, al Motore Wankel attuale in Tab 1B e ai motori salvati nel DB).
@@ -758,6 +1371,7 @@ export const REFERENCE_HYBRID_ICE_ENGINES: CoupledIceEngineOption[] = [
       { rpm: 6000, torqueNm: 134, powerHp: 115 },
       { rpm: 6400, torqueNm: 122, powerHp: 111 },
     ],
+    intendedOrientation: 'Trasversale',
   },
   {
     id: 'ref-ice-i4-2000-turbo',
@@ -798,6 +1412,7 @@ export const REFERENCE_HYBRID_ICE_ENGINES: CoupledIceEngineOption[] = [
       { rpm: 6500, torqueNm: 265, powerHp: 245 },
       { rpm: 6800, torqueNm: 242, powerHp: 234 },
     ],
+    intendedOrientation: 'Trasversale',
   },
   {
     id: 'ref-ice-v8-4000-biturbo',
@@ -839,5 +1454,6 @@ export const REFERENCE_HYBRID_ICE_ENGINES: CoupledIceEngineOption[] = [
       { rpm: 7000, torqueNm: 635, powerHp: 633 },
       { rpm: 7500, torqueNm: 565, powerHp: 603 },
     ],
+    intendedOrientation: 'Longitudinale',
   },
 ];

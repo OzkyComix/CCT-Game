@@ -30,6 +30,7 @@ import {
   type TurboType,
   calculateEstimatedDurabilityKm,
 } from '../types/gameTypes';
+import { calculateOrientationMechanicalAdaptation } from './volumeMath';
 
 export interface PistonEngineConfigInput {
   architecture: PistonArchitecture;
@@ -60,6 +61,7 @@ export interface PistonEngineConfigInput {
   turboPosition: TurboPosition;
   catalystEra: CatalystEra;
   intendedOrientation: EngineOrientation;
+  nativeOrientation?: EngineOrientation;
   priceTier: PriceTier;
   referenceClass: ReferenceClass;
 }
@@ -344,13 +346,12 @@ export function calculatePistonGeometryAndDimensions(
       155;
   }
 
-  if (config.intendedOrientation === 'Trasversale') {
-    baseLengthMm -= 15;
-    baseWidthMm += 22;
-  } else {
-    baseLengthMm += 18;
-    baseWidthMm -= 15;
-  }
+  const orientationAdapt = calculateOrientationMechanicalAdaptation(
+    config.nativeOrientation,
+    config.intendedOrientation,
+  );
+  baseLengthMm += orientationAdapt.lengthDeltaMm;
+  baseWidthMm += orientationAdapt.widthDeltaMm;
 
   if (config.turboType !== 'NaturallyAspirated') {
     const posSpec =
@@ -472,13 +473,19 @@ export function calculateEngineCosts(config: PistonEngineConfigInput): {
     );
   }
 
+  const orientationAdapt = calculateOrientationMechanicalAdaptation(
+    config.nativeOrientation,
+    config.intendedOrientation,
+  );
+
   const unitProductionCost = Math.round(
     coreMechanicalCost +
       fuelSysSpec.unitCost * Math.pow(cylinderFactor, 0.65) +
       intakeSpec.cost +
       exhaustSpec.cost * (config.architecture === 'Inline' ? 1.0 : 1.35) +
       turboSystemUnitCost +
-      catalystSpec.unitCost,
+      catalystSpec.unitCost +
+      orientationAdapt.unitCostDelta,
   );
 
   const transversePackagingMultiplier =
@@ -555,6 +562,11 @@ export function simulatePistonEngineDyno(
 
   const isDiesel = config.fuelType === 'Diesel';
   const isVR15 = config.architecture === 'V' && config.bankAngleDeg <= 15;
+
+  const orientationAdapt = calculateOrientationMechanicalAdaptation(
+    config.nativeOrientation,
+    config.intendedOrientation,
+  );
 
   // 1. Limite Fisico Meccanico e Limitatore Manuale (che tronca soltanto la curva senza deformarla!)
   const maxSafeMechanicalRpm = calculateMaxSafeMechanicalRpm(config);
@@ -846,9 +858,14 @@ export function simulatePistonEngineDyno(
       }
     }
 
-    // Applica contropressione catalizzatore e eventuale taglio potenza da Detonazione (Knock)
+    // Applica contropressione catalizzatore, eventuale taglio potenza da Detonazione (Knock) e adattamento meccanico orientamento
     currentBmepBar = Number(
-      (currentBmepBar * catalystPowerFactor * knockPowerMultiplier).toFixed(2),
+      (
+        currentBmepBar *
+        catalystPowerFactor *
+        knockPowerMultiplier *
+        orientationAdapt.powerMultiplier
+      ).toFixed(2),
     );
 
     // FORMULA FISICA ESATTA DEI MOTORI 4 TEMPI:
@@ -1099,7 +1116,8 @@ export function simulatePistonEngineDyno(
     catalystReliabilityPenalty -
     boostAndBmepPenalty -
     highCrReliabilityPenalty -
-    knockWarning.reliabilityPenaltyPercent;
+    knockWarning.reliabilityPenaltyPercent +
+    orientationAdapt.reliabilityDeltaPercent;
 
   const reliabilityPercent = Number(
     Math.min(99.0, Math.max(10.0, rawReliabilityPercent)).toFixed(1),

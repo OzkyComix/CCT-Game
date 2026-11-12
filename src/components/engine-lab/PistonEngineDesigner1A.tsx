@@ -15,6 +15,7 @@ import {
   Sparkles,
   Unlock,
   Wind,
+  Wrench,
   Zap,
 } from 'lucide-react';
 import {
@@ -44,7 +45,12 @@ import {
   getActiveTurboStagesAr,
   simulatePistonEngineDyno,
 } from '../../math/engineMath';
-import { evaluateEngineBayCompatibility } from '../../math/volumeMath';
+import {
+  calculateEngineInBayDimensions,
+  calculateOrientationMechanicalAdaptation,
+  evaluateEngineBayCompatibility,
+} from '../../math/volumeMath';
+import { calculatePistonVariantRdCost } from '../../math/variantRdMath';
 import { useGameStore } from '../../store/useGameStore';
 import type {
   CatalystEra,
@@ -91,6 +97,9 @@ export const PistonEngineDesigner1A: React.FC<PistonEngineDesigner1AProps> = ({
     saveEngineToDatabase,
     toggleEngineB2B,
     setLivePistonDraft,
+    activeVariantParent,
+    startVariant,
+    clearVariant,
   } = useGameStore();
 
   // Metadati motore
@@ -137,6 +146,71 @@ export const PistonEngineDesigner1A: React.FC<PistonEngineDesigner1AProps> = ({
   const [selectedChassisIds, setSelectedChassisIds] = useState<string[]>(() =>
     chassisList.slice(0, 2).map((c) => c.id),
   );
+
+  // Helper resolvers per mappare indifferentemente ID o Nome localizzato all'ID corretto del componente
+  const resolveBlockId = (val?: string) =>
+    BLOCK_MATERIALS.find((b) => b.id === val || b.name === val)?.id ?? BLOCK_MATERIALS[0].id;
+  const resolveHeadId = (val?: string) =>
+    HEAD_MATERIALS.find((h) => h.id === val || h.name === val)?.id ?? HEAD_MATERIALS[0].id;
+  const resolvePistonId = (val?: string) =>
+    PISTON_TYPES.find((p) => p.id === val || p.name === val)?.id ?? PISTON_TYPES[0].id;
+  const resolveConrodId = (val?: string) =>
+    CONROD_TYPES.find((c) => c.id === val || c.name === val)?.id ?? CONROD_TYPES[0].id;
+  const resolveCrankId = (val?: string) =>
+    CRANKSHAFT_TYPES.find((c) => c.id === val || c.name === val)?.id ?? CRANKSHAFT_TYPES[0].id;
+  const resolveCamId = (val?: string) =>
+    CAMSHAFT_TYPES.find((c) => c.id === val || c.name === val)?.id ?? CAMSHAFT_TYPES[2].id;
+  const resolveFuelSysId = (val?: string) =>
+    FUEL_SYSTEMS.find((f) => f.id === val || f.name === val)?.id ?? FUEL_SYSTEMS[0].id;
+  const resolveIntakeId = (val?: string) =>
+    INTAKE_SYSTEMS.find((i) => i.id === val || i.name === val)?.id ?? INTAKE_SYSTEMS[0].id;
+  const resolveExhaustId = (val?: string) =>
+    EXHAUST_MANIFOLDS.find((e) => e.id === val || e.name === val)?.id ?? EXHAUST_MANIFOLDS[0].id;
+
+  // Sincronizza specifica quando viene attivata la Modalità Variante / Evoluzione
+  useEffect(() => {
+    if (activeVariantParent && activeVariantParent.type === 'piston') {
+      const eng = activeVariantParent.entity as EngineEntity;
+      if (eng.pistonSpecs) {
+        setEngineName(`${eng.name} Evo`);
+        setCodeName(`${eng.codeName}-EVO`);
+        setOwnerSubBrandId(eng.ownerSubBrandId);
+        const p = eng.pistonSpecs;
+        setConfig({
+          architecture: p.architecture,
+          bankAngleDeg: p.bankAngleDeg ?? 90,
+          cylinders: p.cylinders,
+          boreMm: p.boreMm,
+          strokeMm: p.strokeMm,
+          valvesPerCylinder: p.valvesPerCylinder,
+          compressionRatio: p.compressionRatio ?? 9.3,
+          manualRedlineRpm: p.manualRedlineRpm ?? eng.telemetry.redlineRpm,
+          blockMaterialId: resolveBlockId(p.blockMaterialId ?? p.blockMaterial),
+          headMaterialId: resolveHeadId(p.headMaterialId ?? p.headMaterial),
+          pistonTypeId: resolvePistonId(p.pistonTypeId ?? p.pistonType),
+          conrodTypeId: resolveConrodId(p.conrodTypeId ?? p.conrodType),
+          crankshaftTypeId: resolveCrankId(p.crankshaftTypeId ?? p.crankshaftType),
+          camshaftTypeId: resolveCamId(p.camshaftTypeId ?? p.camshaftType),
+          fuelType: p.fuelType,
+          fuelSystemId: resolveFuelSysId(p.fuelSystemId ?? p.fuelSystem),
+          intakeSystemId: resolveIntakeId(p.intakeSystemId ?? p.intakeSystem),
+          exhaustManifoldId: resolveExhaustId(p.exhaustManifoldId ?? p.exhaustManifold),
+          turboType: p.turboType,
+          turboCountConfig: p.turboCountConfig ?? 'TwinTurbo',
+          turboBearingType: p.turboBearingType ?? 'BallBearing',
+          turboArRatio: p.turboArRatio ?? 0.65,
+          turboStagesArRatios: p.turboStagesArRatios ?? [0.65, 0.65, 0.65, 0.65],
+          boostPressureBar: p.boostPressureBar ?? 0.0,
+          turboPosition: p.turboPosition,
+          catalystEra: p.catalystEra,
+          intendedOrientation: p.intendedOrientation ?? 'Longitudinale',
+          nativeOrientation: p.nativeOrientation ?? p.intendedOrientation ?? 'Longitudinale',
+          priceTier: eng.taxonomy.priceTier,
+          referenceClass: eng.taxonomy.referenceClass,
+        });
+      }
+    }
+  }, [activeVariantParent]);
 
   const [feedbackBanner, setFeedbackBanner] = useState<{
     type: 'ok' | 'err';
@@ -193,6 +267,8 @@ export const PistonEngineDesigner1A: React.FC<PistonEngineDesigner1AProps> = ({
       estimatedLifespanKm: telemetry.estimatedLifespanKm,
       unitProductionCost: telemetry.unitProductionCost,
       curve: telemetry.curve,
+      intendedOrientation: config.intendedOrientation,
+      nativeOrientation: config.nativeOrientation ?? config.intendedOrientation,
     });
   }, [
     engineName,
@@ -201,6 +277,8 @@ export const PistonEngineDesigner1A: React.FC<PistonEngineDesigner1AProps> = ({
     config.cylinders,
     config.fuelType,
     config.turboType,
+    config.intendedOrientation,
+    config.nativeOrientation,
     geometry,
     telemetry,
     setLivePistonDraft,
@@ -238,16 +316,31 @@ export const PistonEngineDesigner1A: React.FC<PistonEngineDesigner1AProps> = ({
 
   // Dimensioni effettive del motore orientato nel vano (scambia L e W se Trasversale)
   const effectiveEngineInBayMm = useMemo(
-    () =>
-      config.intendedOrientation === 'Trasversale'
-        ? {
-            lengthMm: geometry.dimensionsMm.widthMm,
-            widthMm: geometry.dimensionsMm.lengthMm,
-            heightMm: geometry.dimensionsMm.heightMm,
-          }
-        : geometry.dimensionsMm,
-    [config.intendedOrientation, geometry.dimensionsMm],
+    () => calculateEngineInBayDimensions(geometry.dimensionsMm, config.intendedOrientation),
+    [geometry.dimensionsMm, config.intendedOrientation],
   );
+
+  // Adattamento Meccanico di Conversione Orientamento (Punto 2)
+  const orientationAdapt = useMemo(
+    () =>
+      calculateOrientationMechanicalAdaptation(
+        config.nativeOrientation,
+        config.intendedOrientation,
+      ),
+    [config.nativeOrientation, config.intendedOrientation],
+  );
+
+  // Calcolo Delta R&D Anti-Exploit in modalità variante (Punto 4)
+  const variantRdResult = useMemo(() => {
+    if (activeVariantParent && activeVariantParent.type === 'piston') {
+      return calculatePistonVariantRdCost(
+        config,
+        activeVariantParent.entity as EngineEntity,
+        costs.developmentCost,
+      );
+    }
+    return null;
+  }, [activeVariantParent, config, costs.developmentCost]);
 
   // Soglia emissioni legale per l'anno corrente
   const legalEmissionLimit = getLegalEmissionLimitForYear(currentYear);
@@ -469,16 +562,25 @@ export const PistonEngineDesigner1A: React.FC<PistonEngineDesigner1AProps> = ({
         totalDisplacementCc: geometry.totalDisplacementCc,
         strokeBoreRatio: geometry.strokeBoreRatio,
         blockMaterial: blockObj.name,
+        blockMaterialId: blockObj.id,
         headMaterial: headObj.name,
+        headMaterialId: headObj.id,
         pistonType: pistonObj.name,
+        pistonTypeId: pistonObj.id,
         conrodType: conrodObj.name,
+        conrodTypeId: conrodObj.id,
         crankshaftType: crankObj.name,
+        crankshaftTypeId: crankObj.id,
         camshaftType: camObj.name,
+        camshaftTypeId: camObj.id,
         valvesPerCylinder: config.valvesPerCylinder,
         fuelType: config.fuelType,
         fuelSystem: fuelSysObj.name,
+        fuelSystemId: fuelSysObj.id,
         intakeSystem: intakeObj.name,
+        intakeSystemId: intakeObj.id,
         exhaustManifold: exhaustObj.name,
+        exhaustManifoldId: exhaustObj.id,
         turboType: config.turboType,
         turboCountConfig: config.turboCountConfig,
         turboBearingType: config.turboBearingType,
@@ -488,13 +590,21 @@ export const PistonEngineDesigner1A: React.FC<PistonEngineDesigner1AProps> = ({
         compressionRatio: config.compressionRatio,
         manualRedlineRpm: telemetry.redlineRpm,
         intendedOrientation: config.intendedOrientation,
+        nativeOrientation: config.nativeOrientation ?? config.intendedOrientation,
         turboPosition: config.turboPosition,
         catalystEra: config.catalystEra,
       },
       telemetry,
       b2bSaleEnabled: true,
       b2bUnitsSold: 0,
-      developmentCost: costs.developmentCost,
+      developmentCost: variantRdResult
+        ? variantRdResult.effectiveDevelopmentCost
+        : costs.developmentCost,
+      parentEngineId: activeVariantParent?.id,
+      parentEngineName: activeVariantParent?.name,
+      isVariant: Boolean(variantRdResult),
+      variantRdSavingsPercent: variantRdResult?.savingsPercentage,
+      variantModifiedParts: variantRdResult?.detectedChanges.map((c) => c.label),
     };
 
     const res = saveEngineToDatabase(newEngine);
@@ -504,6 +614,9 @@ export const PistonEngineDesigner1A: React.FC<PistonEngineDesigner1AProps> = ({
         msg: res.reason ?? 'Risorse insufficienti per omologare il motore.',
       });
     } else {
+      if (variantRdResult) {
+        clearVariant();
+      }
       setFeedbackBanner({
         type: 'ok',
         msg: `Motore "${newEngine.name}" (${newEngine.codeName}) omologato e registrato nel Database aziendale!`,
@@ -648,11 +761,40 @@ export const PistonEngineDesigner1A: React.FC<PistonEngineDesigner1AProps> = ({
             BMEP Max: {telemetry.peakBmepBar} bar
           </span>
           <span className="px-3 py-1.5 rounded bg-slate-900 border border-slate-800 text-sky-300 font-bold">
-            LWH Motore: {geometry.dimensionsMm.lengthMm}×{geometry.dimensionsMm.widthMm}×
-            {geometry.dimensionsMm.heightMm} mm
+            Nel Vano ({config.intendedOrientation}): L={effectiveEngineInBayMm.lengthMm}×W=
+            {effectiveEngineInBayMm.widthMm}×H={effectiveEngineInBayMm.heightMm} mm
+          </span>
+          <span className="px-3 py-1.5 rounded bg-slate-900/60 border border-slate-800/80 text-slate-400">
+            Nativo Albero: {geometry.dimensionsMm.lengthMm}×{geometry.dimensionsMm.widthMm} mm
           </span>
         </div>
       </div>
+
+      {/* Banner Modalità Variante / Evoluzione attiva (Punto 3) */}
+      {activeVariantParent && activeVariantParent.type === 'piston' && (
+        <div className="p-4 rounded-xl border border-sky-500/50 bg-sky-950/40 flex items-center justify-between gap-4 font-mono shadow-lg shadow-sky-500/10">
+          <div className="flex items-center gap-3">
+            <Sparkles className="w-5 h-5 text-amber-400 shrink-0" />
+            <div>
+              <div className="text-xs font-bold text-sky-200">
+                Modalità Variante / Evoluzione attiva da:{' '}
+                <span className="text-amber-300">{activeVariantParent.name}</span>{' '}
+                <span className="text-slate-400">({activeVariantParent.codeName})</span>
+              </div>
+              <div className="text-[11px] text-slate-400">
+                Algoritmo Delta R&D Anti-Exploit attivo: il costo di progettazione viene calcolato solo sulle modifiche effettive rispetto al motore padre.
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={clearVariant}
+            className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-bold cursor-pointer shrink-0 transition"
+          >
+            Esci da Modalità Variante
+          </button>
+        </div>
+      )}
 
       {feedbackBanner && (
         <div
@@ -817,6 +959,57 @@ export const PistonEngineDesigner1A: React.FC<PistonEngineDesigner1AProps> = ({
                     <div className="text-[10px] text-slate-400 mt-0.5">{item.desc}</div>
                   </button>
                 ))}
+              </div>
+
+              {/* Badge Dettaglio Tecnico Adattamento Meccanico (Punto 2) */}
+              <div
+                className={`mt-3 p-3 rounded-lg border text-xs font-mono flex items-start gap-2.5 transition ${
+                  orientationAdapt.conversionType !== 'Native'
+                    ? 'bg-amber-950/40 border-amber-500/50 text-amber-200'
+                    : 'bg-slate-950 border-slate-800 text-slate-300'
+                }`}
+              >
+                <Wrench
+                  className={`w-4 h-4 shrink-0 mt-0.5 ${
+                    orientationAdapt.conversionType !== 'Native'
+                      ? 'text-amber-400'
+                      : 'text-sky-400'
+                  }`}
+                />
+                <div className="space-y-1 w-full">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold uppercase tracking-wider text-[11px] text-slate-200">
+                      {orientationAdapt.conversionType === 'Native'
+                        ? 'Orientamento Nativo di Progetto'
+                        : orientationAdapt.conversionType === 'LongitudinalToTransverse'
+                          ? 'Adattamento: Longitudinale → Trasversale'
+                          : 'Adattamento: Trasversale → Longitudinale'}
+                    </span>
+                    {orientationAdapt.conversionType !== 'Native' && (
+                      <span className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[10px] font-bold">
+                        {orientationAdapt.unitCostDelta > 0
+                          ? `+$${orientationAdapt.unitCostDelta}/pz`
+                          : ''}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    {orientationAdapt.technicalBadge}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-3 pt-1 border-t border-slate-800/80 text-[10px] text-slate-300">
+                    <span>
+                      Quota Fronte-Retro (L_bay):{' '}
+                      <strong className="text-amber-300">{effectiveEngineInBayMm.lengthMm} mm</strong>
+                    </span>
+                    <span>
+                      Quota Destra-Sinistra (W_bay):{' '}
+                      <strong className="text-sky-300">{effectiveEngineInBayMm.widthMm} mm</strong>
+                    </span>
+                    <span className="text-slate-500 italic">
+                      ({config.intendedOrientation === 'Trasversale' ? 'Ruotato 90°: L e W scambiati' : 'In Asse Standard'})
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1852,6 +2045,65 @@ export const PistonEngineDesigner1A: React.FC<PistonEngineDesigner1AProps> = ({
               </div>
             </div>
 
+            {/* Delta R&D Anti-Exploit Summary se siamo in Modalità Variante */}
+            {variantRdResult && (
+              <div className="p-3.5 rounded-xl border font-mono text-xs space-y-2 bg-slate-950/90 border-amber-500/40">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-amber-300 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Variante da: {variantRdResult.parentName} ({variantRdResult.parentCodeName})</span>
+                  </span>
+                  <span
+                    className={`px-2 py-0.5 rounded font-bold text-[10px] ${
+                      variantRdResult.hasStructuralMoldChange
+                        ? 'bg-red-950 border border-red-500 text-red-300'
+                        : 'bg-emerald-950 border border-emerald-500 text-emerald-300'
+                    }`}
+                  >
+                    {variantRdResult.hasStructuralMoldChange
+                      ? 'Strutturale (95% R&D)'
+                      : `-${variantRdResult.savingsPercentage}% R&D`}
+                  </span>
+                </div>
+
+                {variantRdResult.structuralWarning && (
+                  <div className="p-2 rounded bg-red-950/50 border border-red-900/60 text-red-300 text-[11px]">
+                    ⚠️ {variantRdResult.structuralWarning}
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between pt-1 border-t border-slate-800 text-[11px]">
+                  <span className="text-slate-400">Costo R&D Pieno:</span>
+                  <span className="line-through text-slate-500">
+                    ${(variantRdResult.baseDevelopmentCost.capitalCost / 1_000_000).toFixed(2)}M • {variantRdResult.baseDevelopmentCost.rdCost} R&D
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-emerald-400 font-semibold">Costo Variante per Differenza:</span>
+                  <span className="font-bold text-emerald-300">
+                    ${(variantRdResult.effectiveDevelopmentCost.capitalCost / 1_000_000).toFixed(2)}M • {variantRdResult.effectiveDevelopmentCost.rdCost} R&D
+                  </span>
+                </div>
+
+                {variantRdResult.detectedChanges.length > 0 && (
+                  <div className="pt-1.5 border-t border-slate-800/80 space-y-1">
+                    <div className="text-[10px] uppercase text-slate-400">
+                      Modifiche Rilevate ({variantRdResult.detectedChanges.length}):
+                    </div>
+                    <div className="max-h-24 overflow-y-auto space-y-0.5 pr-1 text-[10px]">
+                      {variantRdResult.detectedChanges.map((ch, idx) => (
+                        <div key={idx} className="flex items-center justify-between text-slate-300">
+                          <span>• {ch.label}</span>
+                          <span className="text-amber-400 font-semibold">+{ch.rdPercentage}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Pulsante Omologazione Motore con Gate Doppia Valuta */}
             <button
               type="button"
@@ -1860,9 +2112,17 @@ export const PistonEngineDesigner1A: React.FC<PistonEngineDesigner1AProps> = ({
             >
               <Save className="w-4 h-4" />
               <span>
-                Omologa Propulsore (-$
-                {(costs.developmentCost.capitalCost / 1_000_000).toFixed(2)}M / -
-                {costs.developmentCost.rdCost} R&D)
+                {variantRdResult ? 'Omologa Variante' : 'Omologa Propulsore'} (-$
+                {(
+                  (variantRdResult
+                    ? variantRdResult.effectiveDevelopmentCost.capitalCost
+                    : costs.developmentCost.capitalCost) / 1_000_000
+                ).toFixed(2)}
+                M / -
+                {variantRdResult
+                  ? variantRdResult.effectiveDevelopmentCost.rdCost
+                  : costs.developmentCost.rdCost}{' '}
+                R&D)
               </span>
             </button>
           </div>
@@ -2009,22 +2269,64 @@ export const PistonEngineDesigner1A: React.FC<PistonEngineDesigner1AProps> = ({
                 {eng.telemetry.peakPowerHp} CV @ {eng.telemetry.peakPowerRpm} rpm •{' '}
                 {eng.telemetry.peakTorqueNm} Nm
               </div>
-              <div className="flex items-center justify-between pt-1 border-t border-slate-900 text-[11px]">
-                <span className="text-sky-300">
-                  Vita: {eng.telemetry.estimatedLifespanKm.toLocaleString('it-IT')} km (
-                  {eng.telemetry.reliabilityPercent}%)
-                </span>
+              {eng.isVariant && (
+                <div className="text-[10px] text-amber-400 font-semibold">
+                  ↳ Variante da {eng.parentEngineName || 'Progetto Base'} (-{eng.variantRdSavingsPercent ?? 0}% R&D)
+                </div>
+              )}
+              <div className="flex items-center justify-between pt-1 border-t border-slate-900 text-[11px] gap-2">
                 <button
                   type="button"
-                  onClick={() => toggleEngineB2B(eng.id)}
-                  className={`px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer ${
-                    eng.b2bSaleEnabled
-                      ? 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-300'
-                      : 'bg-slate-800 border border-slate-700 text-slate-400'
-                  }`}
+                  onClick={() => {
+                    if (eng.propulsionType === 'Wankel_1B') {
+                      startVariant({
+                        type: 'wankel',
+                        id: eng.id,
+                        name: eng.name,
+                        codeName: eng.codeName,
+                        entity: eng,
+                      });
+                      onSwitchToWankel?.();
+                    } else if (eng.propulsionType === 'ElectricHybrid_1C') {
+                      startVariant({
+                        type: 'electricMotor',
+                        id: eng.id,
+                        name: eng.name,
+                        codeName: eng.codeName,
+                        entity: eng,
+                      });
+                      onSwitchToElectricHybrid?.();
+                    } else {
+                      startVariant({
+                        type: 'piston',
+                        id: eng.id,
+                        name: eng.name,
+                        codeName: eng.codeName,
+                        entity: eng,
+                      });
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }
+                  }}
+                  className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/30 cursor-pointer"
                 >
-                  {eng.b2bSaleEnabled ? `B2B ON (${eng.b2bUnitsSold} pz)` : 'B2B OFF'}
+                  Crea Variante / Evo
                 </button>
+                <div className="flex items-center gap-2">
+                  <span className="text-sky-300">
+                    {eng.telemetry.reliabilityPercent}%
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => toggleEngineB2B(eng.id)}
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer ${
+                      eng.b2bSaleEnabled
+                        ? 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-300'
+                        : 'bg-slate-800 border border-slate-700 text-slate-400'
+                    }`}
+                  >
+                    {eng.b2bSaleEnabled ? `B2B ON (${eng.b2bUnitsSold} pz)` : 'B2B OFF'}
+                  </button>
+                </div>
               </div>
             </div>
           ))}

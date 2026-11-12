@@ -219,16 +219,25 @@ export interface PistonEngineSpecs {
   totalDisplacementCc: number;
   strokeBoreRatio: number;
   blockMaterial: string;
+  blockMaterialId?: string;
   headMaterial: string;
+  headMaterialId?: string;
   pistonType: string;
+  pistonTypeId?: string;
   conrodType: string;
+  conrodTypeId?: string;
   crankshaftType: string;
+  crankshaftTypeId?: string;
   camshaftType: string;
+  camshaftTypeId?: string;
   valvesPerCylinder: number;
   fuelType: 'Benzina' | 'Diesel' | 'BioFuel' | 'RaceFuel';
   fuelSystem: string; // es. Carburatore, Iniezione Indiretta, Precamera, Common Rail, Diretta
+  fuelSystemId?: string;
   intakeSystem: string;
+  intakeSystemId?: string;
   exhaustManifold: string;
+  exhaustManifoldId?: string;
   turboType: TurboType;
   turboCountConfig?: TurboCountConfig;
   turboBearingType?: 'Journal' | 'BallBearing';
@@ -239,6 +248,7 @@ export interface PistonEngineSpecs {
   compressionRatio?: number;
   manualRedlineRpm?: number;
   intendedOrientation?: EngineOrientation;
+  nativeOrientation?: EngineOrientation;
   turboPosition: TurboPosition;
   catalystEra: CatalystEra;
 }
@@ -275,6 +285,7 @@ export interface WankelEngineSpecs {
   boostPressureBar?: number;
   manualRedlineRpm: number;
   intendedOrientation: EngineOrientation;
+  nativeOrientation?: EngineOrientation;
   turboPosition: TurboPosition;
   catalystEra: CatalystEra;
   oilConsumptionLPer1000Km: number;
@@ -304,6 +315,51 @@ export type BenchElectricDriveArrangement =
   | 'Tri_3x'
   | 'Quad_4x';
 
+export type StatorWindingType =
+  | 'RoundWireStandard' // Filo Tondo Standard (Riempimento 45%)
+  | 'HairpinFlat' // Barre Piatte Hairpin (Riempimento 70%)
+  | 'HairpinContinuousMultiLayer' // Hairpin Continuo Multi-Strato
+  | 'LitzRacingWire'; // Filo Litz / Rame Puro Racing
+
+export type InverterPowerElectronicsType =
+  | 'Silicon_IGBT' // Inverter IGBT al Silicio (Economico)
+  | 'Silicon_MOSFET' // Inverter MOSFET Silicio Avanzato
+  | 'SiliconCarbide_SiC' // Inverter Carburo di Silicio (SiC MOSFET)
+  | 'Dual_SiC_GaN_Racing'; // Dual-Inverter SiC / GaN Alta Corrente (Corsa)
+
+export type RotorSleeveBearingType =
+  | 'SteelLaminationStandard' // Lamierini Acciaio + Cuscinetti Acciaio Standard (max 14.000 RPM)
+  | 'InconelSleeveHybrid' // Camicia Inconel + Cuscinetti Ibridi (max 18.000 RPM)
+  | 'CarbonPrepregCeramic'; // Camicia in Fibra di Carbonio Pre-Preg + Cuscinetti Ceramici Si3N4 (max 24.000 RPM)
+
+export type RotorMagnetMaterialType =
+  | 'FerriteStandardCage' // Ferrite / Gabbia Alluminio Standard (-15% coppia/potenza, zero terre rare)
+  | 'NeodymiumNdFeB' // Neodimio Standard (NdFeB N42) (1.0x)
+  | 'NeodymiumDyUH' // Neodimio-Disprosio Alta Temperatura (NdFeB-UH 200°C) (+10% coppia)
+  | 'SamariumCobaltRacing'; // Samario-Cobalto (SmCo) / Leghe Permendur Racing (+18% coppia/potenza)
+
+export type MotorHousingType =
+  | 'DieCastAluminum' // Alluminio Pressofuso Standard (base)
+  | 'AcousticDampedActiveNVH' // Carcassa Silenziata con Supporti Attivi NVH (+4 kg, comfort lusso)
+  | 'MagnesiumCarbonUltralight' // Magnesio e Carbonio Ultraleggero (Corsa) (-22% peso carcassa)
+  | 'ArmoredSealedIP69K'; // Carcassa Blindata Sigillata IP69K (Fuoristrada) (+12 kg)
+
+export type BatteryPackStructure =
+  | 'ModularAluminum' // Moduli Standard con Busbar in Alluminio
+  | 'CellToPackCopper' // Cell-to-Pack (CTP) con Busbar in Rame (-8% peso)
+  | 'CellToChassisCTC' // Cell-to-Chassis Strutturale (CTC) (-15% peso)
+  | 'CarbonLaserSilverBusbar'; // Guscio Monoscocca in Carbonio + Busbar Rame Argentato Laser (Corsa) (-25% peso)
+
+export type BmsCalibrationProfile =
+  | 'ConservativeLongevity' // Conservativa / Longevità (Buffer 12% - Scarica 1.5C)
+  | 'RoadBalanced' // Stradale Bilanciata (Buffer 8% - Scarica 3C)
+  | 'PerformanceSport' // Performance / Sport (Buffer 4% - Scarica 5C)
+  | 'RaceExtreme'; // Qualifica / Corsa Estrema (Buffer 1% - Scarica 10C)
+
+export type UnderbodyShieldType =
+  | 'StandardSteelShield' // Lamiera Standard
+  | 'TitaniumKevlarIP69K'; // Piastra Ballistica Titanio/Kevlar IP69K (Fuoristrada/Rally)
+
 export type BatteryChemistry = 'LFP' | 'NMC811' | 'NCA' | 'SolidState';
 
 export type ElectricCoolingSystem = 'Air' | 'LiquidGlycol' | 'DirectDielectric';
@@ -314,10 +370,10 @@ export type VoltageArchitecture = 400 | 800 | 1000;
 
 /**
  * 1. Singola Unità Motore Elettrico Universale (Modulo 1.4):
- * Definita esclusivamente da tecnologia, diametro statore, lunghezza rotore,
- * tensione, raffreddamento, fascia prezzo e classe.
- * Non contiene alcun parametro di posizionamento (Anteriore/Posteriore)
- * o orientamento (Trasversale/Longitudinale), né nel modello né nel prezzo.
+ * Definita esclusivamente da tecnologia, componenti fisici (avvolgimenti, inverter,
+ * cuscinetti/camicia, materiale rotore, carcassa), diametro statore, lunghezza rotore,
+ * tensione e raffreddamento.
+ * PriceTier e ReferenceClass sono derivati automaticamente dietro le quinte.
  */
 export interface ElectricMotorSpec {
   id?: string;
@@ -328,9 +384,16 @@ export interface ElectricMotorSpec {
   rotorLengthMm: number; // 80 - 280 mm
   voltageArchitecture: VoltageArchitecture; // 400 | 800 | 1000
   coolingSystem: ElectricCoolingSystem; // Air | LiquidGlycol | DirectDielectric
+  // 5 Componenti Hardware Reali
+  statorWinding?: StatorWindingType;
+  inverterPowerElectronics?: InverterPowerElectronicsType;
+  rotorSleeveBearing?: RotorSleeveBearingType;
+  rotorMagnetMaterial?: RotorMagnetMaterialType;
+  motorHousing?: MotorHousingType;
+  // Campi retrocompatibili derivati
   priceTier: PriceTier;
   referenceClass: ReferenceClass;
-  maxMotorRpm?: number; // 14000 - 22000 rpm
+  maxMotorRpm?: number; // 14000 - 24000 rpm
 }
 
 /**
@@ -364,8 +427,9 @@ export interface SingleElectricMotorTelemetry {
 
 /**
  * 2. Pacco Batteria Indipendente (Modulo 1.4):
- * Definito da chimica, kWh, tensione, raffreddamento, fascia prezzo e classe,
- * valutabile e salvabile separatamente.
+ * Definito da chimica, kWh, architettura strutturale, taratura BMS/C-Rate,
+ * protezione sottoscocca, tensione e raffreddamento.
+ * PriceTier e ReferenceClass sono derivati automaticamente dietro le quinte.
  */
 export interface BatteryPackSpec {
   id?: string;
@@ -375,6 +439,11 @@ export interface BatteryPackSpec {
   batteryCapacityKwh: number; // 0.8 - 150 kWh
   voltageArchitecture: VoltageArchitecture; // 400 | 800 | 1000
   coolingSystem: ElectricCoolingSystem; // Air | LiquidGlycol | DirectDielectric
+  // Parametri Hardware Reali
+  packStructure?: BatteryPackStructure;
+  bmsCalibration?: BmsCalibrationProfile;
+  underbodyShield?: UnderbodyShieldType;
+  // Campi retrocompatibili derivati
   priceTier: PriceTier;
   referenceClass: ReferenceClass;
 }
@@ -422,6 +491,12 @@ export interface ElectricMotorEntity {
   estimatedLifespanKm: number;
   unitProductionCost: number;
   developmentCost: DualCurrencyCost;
+  /** Collegamento al progetto padre in caso di Variante / Evoluzione */
+  parentMotorId?: string;
+  parentMotorName?: string;
+  isVariant?: boolean;
+  variantRdSavingsPercent?: number;
+  variantModifiedParts?: string[];
 }
 
 /**
@@ -440,6 +515,12 @@ export interface BatteryPackEntity {
   estimatedLifespanKm: number;
   unitProductionCost: number;
   developmentCost: DualCurrencyCost;
+  /** Collegamento al progetto padre in caso di Variante / Evoluzione */
+  parentBatteryId?: string;
+  parentBatteryName?: string;
+  isVariant?: boolean;
+  variantRdSavingsPercent?: number;
+  variantModifiedParts?: string[];
 }
 
 /**
@@ -497,6 +578,8 @@ export interface CoupledIceEngineOption {
   estimatedLifespanKm: number;
   unitProductionCost: number;
   curve: DynoCurvePoint[];
+  intendedOrientation: EngineOrientation;
+  nativeOrientation?: EngineOrientation;
 }
 
 export interface ElectricHybridSpecs {
@@ -571,6 +654,16 @@ export interface ElectricHybridEngineConfigInput {
   voltageArchitecture: VoltageArchitecture;
   coolingSystem: ElectricCoolingSystem;
   inverterTech: InverterTech;
+  // 5 Componenti Hardware Fisici Motore
+  statorWinding?: StatorWindingType;
+  inverterPowerElectronics?: InverterPowerElectronicsType;
+  rotorSleeveBearing?: RotorSleeveBearingType;
+  rotorMagnetMaterial?: RotorMagnetMaterialType;
+  motorHousing?: MotorHousingType;
+  // Parametri Hardware Pacco Batteria
+  packStructure?: BatteryPackStructure;
+  bmsCalibration?: BmsCalibrationProfile;
+  underbodyShield?: UnderbodyShieldType;
   gearboxType: 'SingleSpeedDirect' | 'TwoSpeedDualClutch';
   gearRatio: number; // 6.5 - 13.5:1
   maxMotorRpm: number; // 14000 - 22000 rpm
@@ -644,6 +737,12 @@ export interface EngineEntity {
   b2bSaleEnabled: boolean;
   b2bUnitsSold: number;
   developmentCost: DualCurrencyCost;
+  /** Collegamento al progetto padre in caso di Variante / Evoluzione */
+  parentEngineId?: string;
+  parentEngineName?: string;
+  isVariant?: boolean;
+  variantRdSavingsPercent?: number;
+  variantModifiedParts?: string[];
 }
 
 // ============================================================================
@@ -657,6 +756,21 @@ export type EngineMountingPosition =
   | 'Posteriore';
 
 export type EngineOrientation = 'Trasversale' | 'Longitudinale';
+
+export type OrientationConversionType =
+  | 'Native'
+  | 'LongitudinalToTransverse'
+  | 'TransverseToLongitudinal';
+
+export interface OrientationMechanicalAdaptation {
+  conversionType: OrientationConversionType;
+  unitCostDelta: number;
+  lengthDeltaMm: number;
+  widthDeltaMm: number;
+  powerMultiplier: number;
+  reliabilityDeltaPercent: number;
+  technicalBadge: string;
+}
 
 export type AWDLayoutType =
   | 'None_2WD'
@@ -675,6 +789,11 @@ export interface ChassisEntity {
   createdYear: number;
   generationNumber: number;
   parentChassisId?: string;
+  /** Predisposizione Fase 2: Piattaforma Padre e Delta R&D Varianti Pianale */
+  parentPlatformId?: string;
+  isPlatformVariant?: boolean;
+  platformVariantRdSavingsPercent?: number;
+  platformModifiedSpecs?: string[];
   taxonomy: UniversalComponentTaxonomy;
   /** Dimensioni esterne base del pianale in mm */
   overallDimensionsMm: DimensionsLWH;

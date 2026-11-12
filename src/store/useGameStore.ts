@@ -21,12 +21,16 @@ import {
   type DualCurrencyCost,
   type DualCurrencyResources,
   type EngineEntity,
+  type PistonEngineSpecs,
+  type WankelEngineSpecs,
   type PriceTier,
   type ReferenceClass,
   type SubBrand,
   type VehicleEntity,
   calculateEstimatedDurabilityKm,
 } from '../types/gameTypes';
+import { simulatePistonEngineDyno } from '../math/engineMath';
+import { simulateWankelEngineDyno } from '../math/wankelMath';
 
 export interface DualCurrencyGateResult {
   allowed: boolean;
@@ -34,6 +38,14 @@ export interface DualCurrencyGateResult {
   missingRdPoints: number;
   missingYear: boolean;
   reason?: string;
+}
+
+export interface ActiveVariantParentInfo {
+  type: 'piston' | 'wankel' | 'electricMotor' | 'batteryPack';
+  id: string;
+  name: string;
+  codeName: string;
+  entity: EngineEntity | ElectricMotorEntity | BatteryPackEntity;
 }
 
 export interface TransactionLogEntry {
@@ -67,6 +79,11 @@ export interface GameState {
   /** Libreria Modulo 1.4: singole unità motore elettrico e pacchi batteria salvati separatamente */
   savedElectricMotors: ElectricMotorEntity[];
   savedBatteryPacks: BatteryPackEntity[];
+
+  /** Stato globale Modalità Variante / Evoluzione attiva */
+  activeVariantParent: ActiveVariantParentInfo | null;
+  startVariant: (info: ActiveVariantParentInfo) => void;
+  clearVariant: () => void;
 
   // Azioni Doppia Valuta & Gate di Validazione
   validateDualCurrencyGate: (cost: DualCurrencyCost) => DualCurrencyGateResult;
@@ -146,6 +163,120 @@ const initialSubBrands: SubBrand[] = [
   },
 ];
 
+const initialPistonSpecs: PistonEngineSpecs = {
+  architecture: 'V',
+  bankAngleDeg: 90,
+  cylinders: 6,
+  boreMm: 86.5,
+  strokeMm: 82.0,
+  unitDisplacementCc: 482,
+  totalDisplacementCc: 2891,
+  strokeBoreRatio: 0.95,
+  blockMaterial: 'Alluminio AlSi Forgiato c/ Riporto Plasma/Nikasil',
+  blockMaterialId: 'blk-alu-forged-nikasil',
+  headMaterial: 'Alluminio Trattato Termicamente T6 Flussi CNC',
+  headMaterialId: 'hd-alu-t6',
+  pistonType: 'Pistoni Forgiati Raffreddati a Getto d’Olio',
+  pistonTypeId: 'pst-forged-oiljet',
+  conrodType: 'Bielle in Acciaio C70 Fratturato',
+  conrodTypeId: 'rod-c70-fractured',
+  crankshaftType: 'Acciaio Forgiato Nitrurato Controbilanciato',
+  crankshaftTypeId: 'crk-forged-nitrided',
+  camshaftType: 'DOHC con Variatore di Fase Continuo (VVT)',
+  camshaftTypeId: 'cam-dohc-vvt',
+  valvesPerCylinder: 4,
+  fuelType: 'Benzina',
+  fuelSystem: 'Iniezione Diretta Ad Alta Pressione (GDI 350 bar)',
+  fuelSystemId: 'fs-gdi-350bar',
+  intakeSystem: 'Doppio Corpo Farfallato Plenum Corto ad Alto Flusso',
+  intakeSystemId: 'int-plenum-short',
+  exhaustManifold: 'Inconel Tubolare Integrato Ultraleggero',
+  exhaustManifoldId: 'exh-inconel',
+  turboType: 'TwinScroll',
+  turboCountConfig: 'TwinTurbo',
+  turboBearingType: 'BallBearing',
+  turboArRatio: 0.65,
+  turboStagesArRatios: [0.65, 0.65],
+  boostPressureBar: 0.245,
+  compressionRatio: 9.3,
+  manualRedlineRpm: 7250,
+  intendedOrientation: 'Longitudinale',
+  nativeOrientation: 'Longitudinale',
+  turboPosition: 'HotV',
+  catalystEra: 'Era4_ActiveGlobalFilter_Euro7',
+};
+
+const initialPistonTelemetry = simulatePistonEngineDyno({
+  ...initialPistonSpecs,
+  priceTier: 'Premium',
+  referenceClass: 'Sport',
+  bankAngleDeg: initialPistonSpecs.bankAngleDeg ?? 90,
+  compressionRatio: initialPistonSpecs.compressionRatio ?? 9.3,
+  turboCountConfig: initialPistonSpecs.turboCountConfig ?? 'TwinTurbo',
+  turboBearingType: initialPistonSpecs.turboBearingType ?? 'BallBearing',
+  turboArRatio: initialPistonSpecs.turboArRatio ?? 0.65,
+  turboStagesArRatios: initialPistonSpecs.turboStagesArRatios ?? [0.65, 0.65],
+  boostPressureBar: initialPistonSpecs.boostPressureBar ?? 0.245,
+  manualRedlineRpm: initialPistonSpecs.manualRedlineRpm ?? 7250,
+  intendedOrientation: initialPistonSpecs.intendedOrientation ?? 'Longitudinale',
+  nativeOrientation: initialPistonSpecs.nativeOrientation ?? 'Longitudinale',
+  blockMaterialId: initialPistonSpecs.blockMaterialId!,
+  headMaterialId: initialPistonSpecs.headMaterialId!,
+  pistonTypeId: initialPistonSpecs.pistonTypeId!,
+  conrodTypeId: initialPistonSpecs.conrodTypeId!,
+  crankshaftTypeId: initialPistonSpecs.crankshaftTypeId!,
+  camshaftTypeId: initialPistonSpecs.camshaftTypeId!,
+  fuelSystemId: initialPistonSpecs.fuelSystemId!,
+  intakeSystemId: initialPistonSpecs.intakeSystemId!,
+  exhaustManifoldId: initialPistonSpecs.exhaustManifoldId!,
+});
+
+const initialWankelSpecs: WankelEngineSpecs = {
+  rotorCount: 2,
+  generatingRadiusMm: 105,
+  eccentricityMm: 15,
+  rotorWidthMm: 80,
+  unitDisplacementCc: 654,
+  totalDisplacementCc: 1308,
+  equivalentDisplacementCc: 2616,
+  portType: 'StandardSide',
+  apexSealMaterialId: 'seal-tool-steel-dlc',
+  apexSealMaterialName: 'Acciaio per Utensili Forgiato 3 Pezzi con Riporto DLC',
+  apexSealThicknessMm: 2.0,
+  housingMaterialId: 'whs-alu-cermet-nikasil',
+  oilMeteringSystemId: 'omp-electronic-mikuni',
+  compressionRatio: 9.0,
+  fuelType: 'Benzina',
+  turboType: 'TwinScroll',
+  turboCountConfig: 'TwinTurbo',
+  turboBearingType: 'Journal',
+  turboArRatio: 0.60,
+  turboStagesArRatios: [0.60, 0.60],
+  turboStagesDiametersMm: [48, 48],
+  boostPressureBar: 0.435,
+  manualRedlineRpm: 8200,
+  intendedOrientation: 'Longitudinale',
+  nativeOrientation: 'Longitudinale',
+  turboPosition: 'Lateral',
+  catalystEra: 'Era2_ThreeWayLambda_80s90s',
+  oilConsumptionLPer1000Km: 0.65,
+  apexSealWearRatePercentPer10kKm: 2.15,
+};
+
+const initialWankelTelemetry = simulateWankelEngineDyno({
+  ...initialWankelSpecs,
+  priceTier: 'Premium',
+  referenceClass: 'Sport',
+  turboCountConfig: initialWankelSpecs.turboCountConfig ?? 'TwinTurbo',
+  turboBearingType: initialWankelSpecs.turboBearingType ?? 'Journal',
+  turboArRatio: initialWankelSpecs.turboArRatio ?? 0.60,
+  turboStagesArRatios: initialWankelSpecs.turboStagesArRatios ?? [0.60, 0.60],
+  turboStagesDiametersMm: initialWankelSpecs.turboStagesDiametersMm ?? [48, 48],
+  boostPressureBar: initialWankelSpecs.boostPressureBar ?? 0.435,
+  intendedOrientation: initialWankelSpecs.intendedOrientation ?? 'Longitudinale',
+  nativeOrientation: initialWankelSpecs.nativeOrientation ?? 'Longitudinale',
+});
+
 const initialEngines: EngineEntity[] = [
   {
     id: 'eng-v6-2900-biturbo',
@@ -169,58 +300,8 @@ const initialEngines: EngineEntity[] = [
       widthMm: 695,
       heightMm: 665,
     },
-    pistonSpecs: {
-      architecture: 'V',
-      bankAngleDeg: 90,
-      cylinders: 6,
-      boreMm: 86.5,
-      strokeMm: 82.0,
-      unitDisplacementCc: 482,
-      totalDisplacementCc: 2891,
-      strokeBoreRatio: 0.95,
-      blockMaterial: 'Alluminio AlSi Forgiato c/ Riporto Plasma/Nikasil',
-      headMaterial: 'Alluminio Trattato Termicamente T6 Flussi CNC',
-      pistonType: 'Pistoni Forgiati Raffreddati a Getto d’Olio',
-      conrodType: 'Bielle in Acciaio C70 Fratturato',
-      crankshaftType: 'Acciaio Forgiato Nitrurato Controbilanciato',
-      camshaftType: 'DOHC con Variatore di Fase Continuo (VVT)',
-      valvesPerCylinder: 4,
-      fuelType: 'Benzina',
-      fuelSystem: 'Iniezione Diretta Ad Alta Pressione (GDI 350 bar)',
-      intakeSystem: 'Doppio Corpo Farfallato Plenum Corto ad Alto Flusso',
-      exhaustManifold: 'Inconel Tubolare Integrato Ultraleggero',
-      turboType: 'TwinScroll',
-      turboBearingType: 'BallBearing',
-      turboArRatio: 0.68,
-      boostPressureBar: 1.55,
-      compressionRatio: 9.3,
-      intendedOrientation: 'Longitudinale',
-      turboPosition: 'HotV',
-      catalystEra: 'Era4_ActiveGlobalFilter_Euro7',
-    },
-    telemetry: {
-      curve: [
-        { rpm: 1500, torqueNm: 380, powerHp: 81 },
-        { rpm: 2500, torqueNm: 600, powerHp: 213 },
-        { rpm: 3500, torqueNm: 600, powerHp: 299 },
-        { rpm: 4500, torqueNm: 600, powerHp: 384 },
-        { rpm: 5500, torqueNm: 575, powerHp: 450 },
-        { rpm: 6500, torqueNm: 540, powerHp: 510 },
-        { rpm: 7250, torqueNm: 470, powerHp: 485 },
-      ],
-      peakPowerHp: 510,
-      peakPowerRpm: 6500,
-      peakTorqueNm: 600,
-      peakTorqueRpm: 2500,
-      redlineRpm: 7250,
-      dryWeightKg: 168,
-      wetWeightKg: 184,
-      thermalEfficiencyPercent: 37.8,
-      emissionsGPerKm: 192,
-      reliabilityPercent: 89.5,
-      estimatedLifespanKm: calculateEstimatedDurabilityKm('Premium', 'Sport', 1.45, 1.25),
-      unitProductionCost: 11_400,
-    },
+    pistonSpecs: initialPistonSpecs,
+    telemetry: initialPistonTelemetry,
     b2bSaleEnabled: true,
     b2bUnitsSold: 1_420,
     developmentCost: {
@@ -251,60 +332,8 @@ const initialEngines: EngineEntity[] = [
       widthMm: 520,
       heightMm: 510,
     },
-    wankelSpecs: {
-      rotorCount: 2,
-      generatingRadiusMm: 105,
-      eccentricityMm: 15,
-      rotorWidthMm: 80,
-      unitDisplacementCc: 654,
-      totalDisplacementCc: 1308,
-      equivalentDisplacementCc: 2616,
-      portType: 'StreetPort',
-      apexSealMaterialId: 'seal-tool-steel-dlc',
-      apexSealMaterialName: 'Acciaio per Utensili Forgiato 3 Pezzi con Riporto DLC',
-      apexSealThicknessMm: 2.0,
-      housingMaterialId: 'whs-alu-cermet-nikasil',
-      oilMeteringSystemId: 'omp-electronic-mikuni',
-      compressionRatio: 9.0,
-      fuelType: 'Benzina',
-      turboType: 'TwinScroll',
-      turboCountConfig: 'TwinTurbo',
-      turboBearingType: 'BallBearing',
-      turboArRatio: 0.65,
-      turboStagesArRatios: [0.65, 0.65],
-      turboStagesDiametersMm: [52, 52],
-      boostPressureBar: 0.75,
-      manualRedlineRpm: 8200,
-      intendedOrientation: 'Longitudinale',
-      turboPosition: 'Lateral',
-      catalystEra: 'Era2_ThreeWayLambda_80s90s',
-      oilConsumptionLPer1000Km: 0.65,
-      apexSealWearRatePercentPer10kKm: 2.15,
-    },
-    telemetry: {
-      curve: [
-        { rpm: 1500, torqueNm: 180, powerHp: 38 },
-        { rpm: 2500, torqueNm: 275, powerHp: 98 },
-        { rpm: 3500, torqueNm: 310, powerHp: 154 },
-        { rpm: 5000, torqueNm: 295, powerHp: 210 },
-        { rpm: 6500, torqueNm: 270, powerHp: 250 },
-        { rpm: 8000, torqueNm: 230, powerHp: 262 },
-      ],
-      peakPowerHp: 265,
-      peakPowerRpm: 6500,
-      peakTorqueNm: 310,
-      peakTorqueRpm: 3500,
-      redlineRpm: 8200,
-      dryWeightKg: 124,
-      wetWeightKg: 138,
-      thermalEfficiencyPercent: 27.2,
-      emissionsGPerKm: 248,
-      reliabilityPercent: 86.0,
-      estimatedLifespanKm: calculateEstimatedDurabilityKm('Premium', 'Sport', 1.55, 1.15),
-      unitProductionCost: 7_650,
-      oilConsumptionLPer1000Km: 0.65,
-      apexSealWearRate: 2.15,
-    },
+    wankelSpecs: initialWankelSpecs,
+    telemetry: initialWankelTelemetry,
     b2bSaleEnabled: true,
     b2bUnitsSold: 840,
     developmentCost: {
@@ -645,6 +674,8 @@ export const useGameStore = create<GameState>((set, get) => ({
       { rpm: 6500, torqueNm: 292, powerHp: 271 },
       { rpm: 6800, torqueNm: 268, powerHp: 260 },
     ],
+    intendedOrientation: 'Longitudinale',
+    nativeOrientation: 'Longitudinale',
   },
   liveWankelDraft: {
     id: 'live-wankel-1b',
@@ -684,9 +715,12 @@ export const useGameStore = create<GameState>((set, get) => ({
       { rpm: 8000, torqueNm: 292, powerHp: 333 },
       { rpm: 8500, torqueNm: 268, powerHp: 324 },
     ],
+    intendedOrientation: 'Longitudinale',
+    nativeOrientation: 'Longitudinale',
   },
   savedElectricMotors: [],
   savedBatteryPacks: [],
+  activeVariantParent: null,
   transactionLog: [
     {
       id: 'tx-init-1',
@@ -835,6 +869,16 @@ export const useGameStore = create<GameState>((set, get) => ({
   setLiveWankelDraft: (draft) =>
     set(() => ({
       liveWankelDraft: draft,
+    })),
+
+  startVariant: (info) =>
+    set(() => ({
+      activeVariantParent: info,
+    })),
+
+  clearVariant: () =>
+    set(() => ({
+      activeVariantParent: null,
     })),
 
   saveElectricMotorToLibrary: (motor) => {

@@ -23,6 +23,7 @@ import {
   type TurboType,
   type WankelPortType,
 } from '../types/gameTypes';
+import { calculateOrientationMechanicalAdaptation } from './volumeMath';
 
 export interface WankelEngineConfigInput {
   rotorCount: number; // 1, 2, 3, 4
@@ -46,6 +47,7 @@ export interface WankelEngineConfigInput {
   turboPosition: TurboPosition;
   manualRedlineRpm: number;
   intendedOrientation: EngineOrientation;
+  nativeOrientation?: EngineOrientation;
   catalystEra: CatalystEra;
   priceTier: PriceTier;
   referenceClass: ReferenceClass;
@@ -138,13 +140,12 @@ export function calculateWankelGeometryAndDimensions(
   const trochoidHeightMm = 2 * (R - e) + 180;
   let baseHeightMm = trochoidHeightMm;
 
-  if (config.intendedOrientation === 'Trasversale') {
-    baseLengthMm -= 15;
-    baseWidthMm += 22;
-  } else {
-    baseLengthMm += 18;
-    baseWidthMm -= 15;
-  }
+  const orientationAdapt = calculateOrientationMechanicalAdaptation(
+    config.nativeOrientation,
+    config.intendedOrientation,
+  );
+  baseLengthMm += orientationAdapt.lengthDeltaMm;
+  baseWidthMm += orientationAdapt.widthDeltaMm;
 
   if (config.turboType !== 'NaturallyAspirated') {
     const posSpec =
@@ -262,7 +263,7 @@ export function evaluateWankelKnockAndStress(config: WankelEngineConfigInput): K
       maxSafeCr,
       powerPenaltyPercent: 0,
       reliabilityPenaltyPercent: 0,
-      message: `Camera Wankel stabile (Soglia Knock con ${config.fuelType}: ${maxSafeCr}:1, tenute ${config.apexSealThicknessMm.toFixed(1)}mm).`,
+      message: `Camera Wankel stabile (Soglia Knock con ${config.fuelType}: ${maxSafeCr}:1, tenute ${(config.apexSealThicknessMm ?? 2.0).toFixed(1)}mm).`,
     };
   }
 
@@ -367,10 +368,16 @@ export function calculateWankelCosts(config: WankelEngineConfigInput): {
     );
   }
 
+  const orientationAdapt = calculateOrientationMechanicalAdaptation(
+    config.nativeOrientation,
+    config.intendedOrientation,
+  );
+
   const unitProductionCost = Math.round(
     coreRotaryCost * tierCostMultiplier[config.priceTier] +
       turboSystemUnitCost +
-      catalystSpec.unitCost,
+      catalystSpec.unitCost +
+      orientationAdapt.unitCostDelta,
   );
 
   // Scostamento dai parametri geometrici standard (105 / 15 / 80) richiede stampi e banchi di equilibratura dedicati:
@@ -430,6 +437,11 @@ export function simulateWankelEngineDyno(config: WankelEngineConfigInput): Engin
     TURBO_COUNT_CONFIGS[0];
   const catalystSpec =
     CATALYST_ERAS.find((c) => c.id === config.catalystEra) ?? CATALYST_ERAS[0];
+
+  const orientationAdapt = calculateOrientationMechanicalAdaptation(
+    config.nativeOrientation,
+    config.intendedOrientation,
+  );
 
   const maxSafeMechanicalRpm = calculateMaxSafeWankelRpm(config);
   const redlineRpm = Math.min(
@@ -614,7 +626,8 @@ export function simulateWankelEngineDyno(config: WankelEngineConfigInput): Engin
         eccentricityTorqueMod *
         highRpmObliquityFactor *
         catalystPowerFactor *
-        knockPowerMultiplier
+        knockPowerMultiplier *
+        orientationAdapt.powerMultiplier
       ).toFixed(2),
     );
 
@@ -737,7 +750,8 @@ export function simulateWankelEngineDyno(config: WankelEngineConfigInput): Engin
     boostPenalty -
     portReliabilityPenalty -
     catalystReliabilityPenalty -
-    knockWarning.reliabilityPenaltyPercent;
+    knockWarning.reliabilityPenaltyPercent +
+    orientationAdapt.reliabilityDeltaPercent;
 
   const reliabilityPercent = Number(
     Math.min(maxReliabilityCeiling, Math.max(15.0, rawReliability)).toFixed(1),

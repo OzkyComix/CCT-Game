@@ -11,19 +11,31 @@ import {
   Layers,
   RotateCw,
   Save,
+  Shield,
   ShieldAlert,
   Sliders,
+  Sparkles,
   Zap,
 } from 'lucide-react';
 import {
   BATTERY_CHEMISTRIES,
+  BATTERY_PACK_STRUCTURE_SPECS,
+  BENCH_MOTOR_SCALING_CONFIGS,
+  BMS_CALIBRATION_SPECS,
+  deriveBatteryPackTaxonomy,
+  deriveElectricMotorTaxonomy,
   ELECTRIC_COOLING_SYSTEMS,
   ELECTRIC_MOTOR_TYPES,
   HYBRID_SYSTEM_TYPES,
+  INVERTER_POWER_ELECTRONICS_SPECS,
+  MOTOR_HOUSING_SPECS,
   MOTOR_LAYOUT_CONFIGS,
   PRICE_TIER_EV_SPECS,
-  REFERENCE_CLASS_EV_SPECS,
   REFERENCE_HYBRID_ICE_ENGINES,
+  ROTOR_MAGNET_MATERIAL_SPECS,
+  ROTOR_SLEEVE_BEARING_SPECS,
+  STATOR_WINDING_SPECS,
+  UNDERBODY_SHIELD_SPECS,
   VOLTAGE_ARCHITECTURES,
 } from '../../data/electricHybridData';
 import { getLegalEmissionLimitForYear } from '../../data/historicalEras';
@@ -32,6 +44,10 @@ import {
   calculateElectricHybridGeometryAndDimensions,
   simulateElectricHybridDyno,
 } from '../../math/evHybridMath';
+import {
+  calculateBatteryPackVariantRdCost,
+  calculateElectricMotorVariantRdCost,
+} from '../../math/variantRdMath';
 import { evaluateEngineBayCompatibility } from '../../math/volumeMath';
 import { useGameStore } from '../../store/useGameStore';
 import type {
@@ -43,22 +59,12 @@ import type {
   EngineEntity,
   EngineOrientation,
   HybridSystemType,
-  PriceTier,
-  ReferenceClass,
 } from '../../types/gameTypes';
 import {
   type OverlaidChassisBayItem,
   VolumeViewer3D,
 } from '../common/VolumeViewer3D';
 
-const PRICE_TIERS: PriceTier[] = ['Economica', 'Media', 'Premium', 'Lusso'];
-const REFERENCE_CLASSES: ReferenceClass[] = [
-  'Normale',
-  'Comfort',
-  'Sport',
-  'Corsa',
-  'Fuoristrada',
-];
 
 /**
  * Converte un EngineEntity (Pistoni 1A o Wankel 1B) salvato nel database in un CoupledIceEngineOption
@@ -96,6 +102,8 @@ function engineEntityToCoupledOption(eng: EngineEntity): CoupledIceEngineOption 
       estimatedLifespanKm: eng.telemetry.estimatedLifespanKm,
       unitProductionCost: eng.telemetry.unitProductionCost,
       curve: eng.telemetry.curve,
+      intendedOrientation: w.intendedOrientation ?? 'Longitudinale',
+      nativeOrientation: w.nativeOrientation ?? w.intendedOrientation ?? 'Longitudinale',
     };
   }
 
@@ -126,6 +134,8 @@ function engineEntityToCoupledOption(eng: EngineEntity): CoupledIceEngineOption 
     estimatedLifespanKm: eng.telemetry.estimatedLifespanKm,
     unitProductionCost: eng.telemetry.unitProductionCost,
     curve: eng.telemetry.curve,
+    intendedOrientation: p?.intendedOrientation ?? 'Longitudinale',
+    nativeOrientation: p?.nativeOrientation ?? p?.intendedOrientation ?? 'Longitudinale',
   };
 }
 
@@ -534,6 +544,9 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
     savedBatteryPacks,
     saveElectricMotorToLibrary,
     saveBatteryPackToLibrary,
+    activeVariantParent,
+    startVariant,
+    clearVariant,
   } = useGameStore();
 
   // Organizzazione Interfaccia in 3 Pannelli Distinti (Punto 5):
@@ -547,6 +560,7 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
     systemType: 'PureEV',
     electricMotorType: 'PermanentMagnetSync',
     motorLayout: 'DualMotor_eAWD',
+    motorCount: 2,
     hasFrontDisconnect: true,
     statorDiameterMm: 235,
     rotorLengthMm: 165,
@@ -555,6 +569,16 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
     voltageArchitecture: 800,
     coolingSystem: 'LiquidGlycol',
     inverterTech: 'SiliconCarbide_SiC',
+    // 5 Componenti Hardware Fisici Motore
+    statorWinding: 'HairpinFlat',
+    inverterPowerElectronics: 'SiliconCarbide_SiC',
+    rotorSleeveBearing: 'InconelSleeveHybrid',
+    rotorMagnetMaterial: 'NeodymiumNdFeB',
+    motorHousing: 'DieCastAluminum',
+    // Parametri Hardware Pacco Batteria
+    packStructure: 'CellToPackCopper',
+    bmsCalibration: 'RoadBalanced',
+    underbodyShield: 'StandardSteelShield',
     gearboxType: 'SingleSpeedDirect',
     gearRatio: 9.0,
     maxMotorRpm: 18000,
@@ -563,8 +587,6 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
     referenceClass: 'Sport',
   });
 
-  const [intendedOrientation, setIntendedOrientation] =
-    useState<EngineOrientation>('Trasversale');
   const [selectedSubBrandId, setSelectedSubBrandId] = useState<string>(
     subBrands[0]?.id ?? 'sb-officine-milano',
   );
@@ -600,26 +622,64 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
     );
   }, [availableCoupledIceEngines, config.coupledIceOptionId, livePistonDraft]);
 
+  // L'orientamento dell'Ibrido è tassativamente ed esclusivamente quello del motore termico accoppiato!
+  // Non si decide a posteriori nel banco ibrido: è una proprietà intrinseca del motore termico selezionato.
+  const effectiveOrientation: EngineOrientation = useMemo(() => {
+    if (config.systemType === 'PureEV') {
+      return 'Trasversale';
+    }
+    return selectedCoupledIce.intendedOrientation ?? 'Longitudinale';
+  }, [config.systemType, selectedCoupledIce]);
+
   // Se è stato caricato un Pacco Batteria salvato, mantiene le sue specifiche
-  const effectiveConfig: ElectricHybridEngineConfigInput = useMemo(
-    () =>
-      config.batterySpec
+  const effectiveConfig: ElectricHybridEngineConfigInput = useMemo(() => {
+    const motorTax = deriveElectricMotorTaxonomy(
+      config.statorWinding,
+      config.inverterPowerElectronics,
+      config.rotorSleeveBearing,
+      config.rotorMagnetMaterial,
+      config.motorHousing,
+    );
+    const battTax = deriveBatteryPackTaxonomy(
+      config.packStructure,
+      config.bmsCalibration,
+      config.underbodyShield,
+    );
+
+    return {
+      ...config,
+      priceTier: motorTax.priceTier,
+      referenceClass: motorTax.referenceClass,
+      inverterTech:
+        config.inverterPowerElectronics === 'Dual_SiC_GaN_Racing'
+          ? 'GalliumNitride_GaN'
+          : config.inverterPowerElectronics === 'SiliconCarbide_SiC'
+            ? 'SiliconCarbide_SiC'
+            : 'Silicon_IGBT',
+      batterySpec: config.batterySpec
         ? {
-            ...config,
-            batterySpec: {
-              ...config.batterySpec,
-              batteryChemistry: config.batteryChemistry,
-              batteryCapacityKwh: config.batteryCapacityKwh,
-            },
+            ...config.batterySpec,
+            batteryChemistry: config.batteryChemistry,
+            batteryCapacityKwh: config.batteryCapacityKwh,
+            packStructure: config.packStructure,
+            bmsCalibration: config.bmsCalibration,
+            underbodyShield: config.underbodyShield,
+            priceTier: battTax.priceTier,
+            referenceClass: battTax.referenceClass,
           }
-        : config,
-    [config],
-  );
+        : undefined,
+    };
+  }, [config]);
 
   // Calcoli Matematici e Telemetrici Real-Time
   const geometry = useMemo(
-    () => calculateElectricHybridGeometryAndDimensions(effectiveConfig, selectedCoupledIce),
-    [effectiveConfig, selectedCoupledIce],
+    () =>
+      calculateElectricHybridGeometryAndDimensions(
+        effectiveConfig,
+        selectedCoupledIce,
+        effectiveOrientation,
+      ),
+    [effectiveConfig, selectedCoupledIce, effectiveOrientation],
   );
 
   const costs = useMemo(
@@ -640,6 +700,74 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
   const [batteryLibName, setBatteryLibName] = useState<string>('Pacco NMC 75 kWh');
   const [batteryLibCode, setBatteryLibCode] = useState<string>('BP-75');
 
+  // Sincronizza activeVariantParent se presente per E-Motor o Battery
+  useEffect(() => {
+    if (activeVariantParent) {
+      if (activeVariantParent.type === 'electricMotor') {
+        const parent = activeVariantParent.entity as ElectricMotorEntity;
+        if (parent && parent.spec) {
+          setActiveSubPanel('motor');
+          setMotorLibName(`${parent.name} Evo`);
+          setMotorLibCode(`${parent.codeName}-EVO`);
+          const s = parent.spec;
+          setConfig((prev) => ({
+            ...prev,
+            electricMotorType: s.electricMotorType,
+            statorDiameterMm: s.statorDiameterMm,
+            rotorLengthMm: s.rotorLengthMm,
+            voltageArchitecture: s.voltageArchitecture,
+            coolingSystem: s.coolingSystem,
+            statorWinding: s.statorWinding ?? prev.statorWinding,
+            inverterPowerElectronics: s.inverterPowerElectronics ?? prev.inverterPowerElectronics,
+            rotorSleeveBearing: s.rotorSleeveBearing ?? prev.rotorSleeveBearing,
+            rotorMagnetMaterial: s.rotorMagnetMaterial ?? prev.rotorMagnetMaterial,
+            motorHousing: s.motorHousing ?? prev.motorHousing,
+          }));
+        }
+      } else if (activeVariantParent.type === 'batteryPack') {
+        const parent = activeVariantParent.entity as BatteryPackEntity;
+        if (parent && parent.spec) {
+          setActiveSubPanel('battery');
+          setBatteryLibName(`${parent.name} Evo`);
+          setBatteryLibCode(`${parent.codeName}-EVO`);
+          const b = parent.spec;
+          setConfig((prev) => ({
+            ...prev,
+            batteryChemistry: b.batteryChemistry,
+            batteryCapacityKwh: b.batteryCapacityKwh,
+            voltageArchitecture: b.voltageArchitecture,
+            packStructure: b.packStructure ?? prev.packStructure,
+            coolingSystem: b.coolingSystem ?? prev.coolingSystem,
+            bmsCalibration: b.bmsCalibration ?? prev.bmsCalibration,
+            underbodyShield: b.underbodyShield ?? prev.underbodyShield,
+          }));
+        }
+      }
+    }
+  }, [activeVariantParent]);
+
+  const motorVariantRdResult = useMemo(() => {
+    if (activeVariantParent && activeVariantParent.type === 'electricMotor') {
+      return calculateElectricMotorVariantRdCost(
+        unitMotor.spec,
+        activeVariantParent.entity as ElectricMotorEntity,
+        unitMotor.developmentCost,
+      );
+    }
+    return null;
+  }, [activeVariantParent, unitMotor.spec, unitMotor.developmentCost]);
+
+  const batteryVariantRdResult = useMemo(() => {
+    if (activeVariantParent && activeVariantParent.type === 'batteryPack') {
+      return calculateBatteryPackVariantRdCost(
+        batteryPack.spec,
+        activeVariantParent.entity as BatteryPackEntity,
+        batteryPack.developmentCost,
+      );
+    }
+    return null;
+  }, [activeVariantParent, batteryPack.spec, batteryPack.developmentCost]);
+
   const handleSaveMotor = () => {
     const entity: ElectricMotorEntity = {
       id: `emot-${Date.now()}`,
@@ -656,9 +784,19 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
       reliabilityPercent: unitMotor.reliabilityPercent,
       estimatedLifespanKm: unitMotor.estimatedLifespanKm,
       unitProductionCost: unitMotor.unitProductionCost,
-      developmentCost: unitMotor.developmentCost,
+      developmentCost: motorVariantRdResult
+        ? motorVariantRdResult.effectiveDevelopmentCost
+        : unitMotor.developmentCost,
+      parentMotorId: activeVariantParent?.id,
+      parentMotorName: activeVariantParent?.name,
+      isVariant: Boolean(motorVariantRdResult),
+      variantRdSavingsPercent: motorVariantRdResult?.savingsPercentage,
+      variantModifiedParts: motorVariantRdResult?.detectedChanges.map((c) => c.label),
     };
     const res = saveElectricMotorToLibrary(entity);
+    if (res.allowed && motorVariantRdResult) {
+      clearVariant();
+    }
     setFeedbackBanner(
       res.allowed
         ? { type: 'ok', msg: `Motore elettrico "${entity.name}" salvato in libreria (${entity.peakPowerHp} CV / ${entity.peakTorqueNm} Nm per unità).` }
@@ -679,9 +817,19 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
       reliabilityPercent: batteryPack.reliabilityPercent,
       estimatedLifespanKm: batteryPack.estimatedLifespanKm,
       unitProductionCost: batteryPack.unitProductionCost,
-      developmentCost: batteryPack.developmentCost,
+      developmentCost: batteryVariantRdResult
+        ? batteryVariantRdResult.effectiveDevelopmentCost
+        : batteryPack.developmentCost,
+      parentBatteryId: activeVariantParent?.id,
+      parentBatteryName: activeVariantParent?.name,
+      isVariant: Boolean(batteryVariantRdResult),
+      variantRdSavingsPercent: batteryVariantRdResult?.savingsPercentage,
+      variantModifiedParts: batteryVariantRdResult?.detectedChanges.map((c) => c.label),
     };
     const res = saveBatteryPackToLibrary(entity);
+    if (res.allowed && batteryVariantRdResult) {
+      clearVariant();
+    }
     setFeedbackBanner(
       res.allowed
         ? { type: 'ok', msg: `Pacco batteria "${entity.name}" salvato in libreria (${entity.spec.batteryCapacityKwh} kWh, ${entity.maxDischargePowerKw} kW scarica max).` }
@@ -697,10 +845,14 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
       rotorLengthMm: m.spec.rotorLengthMm,
       voltageArchitecture: m.spec.voltageArchitecture,
       coolingSystem: m.spec.coolingSystem,
+      statorWinding: m.spec.statorWinding ?? prev.statorWinding,
+      inverterPowerElectronics: m.spec.inverterPowerElectronics ?? prev.inverterPowerElectronics,
+      rotorSleeveBearing: m.spec.rotorSleeveBearing ?? prev.rotorSleeveBearing,
+      rotorMagnetMaterial: m.spec.rotorMagnetMaterial ?? prev.rotorMagnetMaterial,
+      motorHousing: m.spec.motorHousing ?? prev.motorHousing,
       priceTier: m.spec.priceTier,
       referenceClass: m.spec.referenceClass,
       maxMotorRpm: m.spec.maxMotorRpm ?? prev.maxMotorRpm,
-      inverterTech: PRICE_TIER_EV_SPECS[m.spec.priceTier].mappedInverterTech,
     }));
   };
 
@@ -709,6 +861,13 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
       ...prev,
       batteryChemistry: b.spec.batteryChemistry,
       batteryCapacityKwh: b.spec.batteryCapacityKwh,
+      voltageArchitecture: b.spec.voltageArchitecture,
+      coolingSystem: b.spec.coolingSystem,
+      packStructure: b.spec.packStructure ?? prev.packStructure,
+      bmsCalibration: b.spec.bmsCalibration ?? prev.bmsCalibration,
+      underbodyShield: b.spec.underbodyShield ?? prev.underbodyShield,
+      priceTier: b.spec.priceTier,
+      referenceClass: b.spec.referenceClass,
       batterySpec: { ...b.spec },
     }));
   };
@@ -752,16 +911,19 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
   );
 
   // Verifica compatibilità vano motore
+  const isPureElectricContext = activeSubPanel === 'motor' || config.systemType === 'PureEV';
+
   const chassisCompatibilityList = useMemo(() => {
     return chassisList.map((chassis) => {
       const res = evaluateEngineBayCompatibility(
         geometry.engineBayDimensionsMm,
-        intendedOrientation,
+        effectiveOrientation,
         chassis,
+        { isPureEV: isPureElectricContext },
       );
       return { chassis, ...res };
     });
-  }, [geometry.engineBayDimensionsMm, intendedOrientation, chassisList]);
+  }, [geometry.engineBayDimensionsMm, effectiveOrientation, chassisList, isPureElectricContext]);
 
   const overlaidChassisBays: OverlaidChassisBayItem[] = useMemo(() => {
     return chassisCompatibilityList
@@ -795,41 +957,56 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
     }));
   };
 
-  // Preset rapidi di dimensionamento statore/rotore
+  // Preset rapidi di dimensionamento statore/rotore e componentistica
   const applyQuickSizingPreset = (preset: 'citycar' | 'sedan' | 'performance' | 'hypercar') => {
     if (preset === 'citycar') {
       setConfig((prev) => ({
         ...prev,
         electricMotorType: 'InductionAsync',
-        motorLayout: 'SingleMotor_FWD',
+        motorLayout: 'SingleMotor_RWD',
+        motorCount: 1,
         statorDiameterMm: 155,
         rotorLengthMm: 85,
         voltageArchitecture: 400,
         batteryChemistry: 'LFP',
         batteryCapacityKwh: prev.systemType === 'PureEV' ? 40 : prev.batteryCapacityKwh,
         coolingSystem: 'Air',
-        priceTier: 'Economica',
-        referenceClass: 'Normale',
+        statorWinding: 'RoundWireStandard',
+        inverterPowerElectronics: 'Silicon_IGBT',
+        rotorSleeveBearing: 'SteelLaminationStandard',
+        rotorMagnetMaterial: 'FerriteStandardCage',
+        motorHousing: 'DieCastAluminum',
+        packStructure: 'ModularAluminum',
+        bmsCalibration: 'ConservativeLongevity',
+        underbodyShield: 'StandardSteelShield',
       }));
     } else if (preset === 'sedan') {
       setConfig((prev) => ({
         ...prev,
         electricMotorType: 'PermanentMagnetSync',
         motorLayout: 'SingleMotor_RWD',
+        motorCount: 1,
         statorDiameterMm: 225,
         rotorLengthMm: 155,
         voltageArchitecture: 800,
         batteryChemistry: 'NMC811',
         batteryCapacityKwh: prev.systemType === 'PureEV' ? 75 : prev.batteryCapacityKwh,
         coolingSystem: 'LiquidGlycol',
-        priceTier: 'Media',
-        referenceClass: 'Comfort',
+        statorWinding: 'HairpinFlat',
+        inverterPowerElectronics: 'Silicon_MOSFET',
+        rotorSleeveBearing: 'InconelSleeveHybrid',
+        rotorMagnetMaterial: 'NeodymiumNdFeB',
+        motorHousing: 'AcousticDampedActiveNVH',
+        packStructure: 'CellToPackCopper',
+        bmsCalibration: 'RoadBalanced',
+        underbodyShield: 'StandardSteelShield',
       }));
     } else if (preset === 'performance') {
       setConfig((prev) => ({
         ...prev,
         electricMotorType: 'IPM_SynRM',
         motorLayout: 'DualMotor_eAWD',
+        motorCount: 2,
         hasFrontDisconnect: true,
         statorDiameterMm: 265,
         rotorLengthMm: 195,
@@ -837,14 +1014,21 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
         batteryChemistry: 'NMC811',
         batteryCapacityKwh: prev.systemType === 'PureEV' ? 92 : prev.batteryCapacityKwh,
         coolingSystem: 'LiquidGlycol',
-        priceTier: 'Premium',
-        referenceClass: 'Sport',
+        statorWinding: 'HairpinContinuousMultiLayer',
+        inverterPowerElectronics: 'SiliconCarbide_SiC',
+        rotorSleeveBearing: 'InconelSleeveHybrid',
+        rotorMagnetMaterial: 'NeodymiumDyUH',
+        motorHousing: 'DieCastAluminum',
+        packStructure: 'CellToChassisCTC',
+        bmsCalibration: 'PerformanceSport',
+        underbodyShield: 'StandardSteelShield',
       }));
     } else {
       setConfig((prev) => ({
         ...prev,
         electricMotorType: 'AxialFlux',
         motorLayout: 'QuadMotor_Independent',
+        motorCount: 4,
         hasFrontDisconnect: false,
         statorDiameterMm: 315,
         rotorLengthMm: 245,
@@ -852,8 +1036,14 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
         batteryChemistry: 'SolidState',
         batteryCapacityKwh: prev.systemType === 'PureEV' ? 115 : prev.batteryCapacityKwh,
         coolingSystem: 'DirectDielectric',
-        priceTier: 'Lusso',
-        referenceClass: 'Corsa',
+        statorWinding: 'LitzRacingWire',
+        inverterPowerElectronics: 'Dual_SiC_GaN_Racing',
+        rotorSleeveBearing: 'CarbonPrepregCeramic',
+        rotorMagnetMaterial: 'SamariumCobaltRacing',
+        motorHousing: 'MagnesiumCarbonUltralight',
+        packStructure: 'CarbonLaserSilverBusbar',
+        bmsCalibration: 'RaceExtreme',
+        underbodyShield: 'TitaniumKevlarIP69K',
       }));
     }
   };
@@ -914,7 +1104,9 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
 
   const isAsm = config.electricMotorType === 'InductionAsync';
   const showDisconnectControl =
-    config.motorLayout === 'DualMotor_eAWD' || config.motorLayout === 'TriMotor_TorqueVectoring';
+    config.motorLayout === 'DualMotor_eAWD' ||
+    config.motorLayout === 'TriMotor_TorqueVectoring' ||
+    config.motorLayout === 'QuadMotor_Independent';
 
   return (
     <div className="space-y-6">
@@ -1071,6 +1263,26 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
           {/* =============================================================== */}
           {activeSubPanel === 'motor' && (
             <div className="space-y-6">
+              {/* Banner Modalità Variante Motore Elettrico attiva */}
+              {activeVariantParent && activeVariantParent.type === 'electricMotor' && (
+                <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between font-mono text-xs">
+                  <div className="flex items-center gap-2 text-amber-300">
+                    <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>
+                      <strong>Modalità Variante Attiva da:</strong> {activeVariantParent.name} (
+                      {activeVariantParent.codeName}) — Calcolo R&D Delta Anti-Exploit
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={clearVariant}
+                    className="px-2.5 py-1 rounded bg-slate-900 border border-slate-700 text-slate-300 hover:text-white hover:border-slate-500 cursor-pointer text-[11px]"
+                  >
+                    Annulla Modalità Variante
+                  </button>
+                </div>
+              )}
+
               {/* Banner descrittivo Pannello 1 */}
               <div className="p-4 rounded-xl border border-sky-500/40 bg-sky-950/20 space-y-1">
                 <div className="flex items-center gap-2">
@@ -1313,43 +1525,58 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
                 </div>
               </section>
 
-              {/* 4. Inverter & Fascia Prezzo / Classe */}
-              <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-4">
+              {/* 4. Componentistica Interna & Hardware Fisico del Motore Elettrico */}
+              <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-5">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <div className="flex items-center gap-2">
+                    <Cpu className="w-4 h-4 text-sky-400" />
+                    <span className="text-xs font-bold font-mono uppercase tracking-wider text-slate-200">
+                      4. Componentistica Interna & Hardware Fisico Motore
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 text-[10px] font-mono">
+                    <span className="px-1.5 py-0.5 rounded bg-slate-800 text-sky-300">
+                      Fascia: {tierSpec.tier}
+                    </span>
+                    <span className="px-1.5 py-0.5 rounded bg-slate-800 text-amber-300">
+                      Classe: {config.referenceClass}
+                    </span>
+                  </div>
+                </div>
+
+                {/* A) Avvolgimenti Statore */}
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-mono text-slate-300 uppercase tracking-wider block">
-                    4. Elettronica Inverter (Fascia di Prezzo)
+                  <label className="text-[11px] font-mono text-slate-300 uppercase tracking-wider flex items-center justify-between">
+                    <span>A) Avvolgimenti Statore</span>
+                    <span className="text-sky-400 font-normal">Riempimento cava & perdite alta frequenza</span>
                   </label>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {PRICE_TIERS.map((tier) => {
-                      const tSpec = PRICE_TIER_EV_SPECS[tier];
-                      const isSelected = config.priceTier === tier;
+                    {STATOR_WINDING_SPECS.map((w) => {
+                      const isSelected = config.statorWinding === w.id;
                       return (
                         <button
-                          key={tier}
+                          key={w.id}
                           type="button"
-                          onClick={() =>
-                            setConfig((prev) => ({
-                              ...prev,
-                              priceTier: tier,
-                              inverterTech: tSpec.mappedInverterTech,
-                            }))
-                          }
+                          onClick={() => setConfig((prev) => ({ ...prev, statorWinding: w.id }))}
                           className={`p-2.5 rounded-lg border text-left transition cursor-pointer flex flex-col justify-between ${
                             isSelected
-                              ? 'bg-amber-950/60 border-amber-500 text-amber-100'
+                              ? 'bg-sky-950/60 border-sky-500 text-sky-100 ring-1 ring-sky-500/40'
                               : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
                           }`}
                         >
                           <div className="flex items-center justify-between gap-2">
-                            <span className="font-bold text-xs">Fascia {tier}</span>
-                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-sky-300">
-                              {tSpec.inverterShort}
+                            <span className="font-bold text-xs">{w.name}</span>
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-amber-300 shrink-0">
+                              {w.powerMultiplier >= 1.0 ? `+${Math.round((w.powerMultiplier - 1) * 100)}%` : `${Math.round((w.powerMultiplier - 1) * 100)}%`} CV
                             </span>
                           </div>
-                          <p className="text-[10px] text-slate-400 mt-1">{tSpec.description}</p>
-                          <div className="mt-2 pt-1 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-mono text-emerald-300">
-                            <span>Potenza ×{tSpec.powerMultiplier.toFixed(2)}</span>
-                            <span>Efficienza {tSpec.inverterEfficiencyPercent}%</span>
+                          <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">{w.description}</p>
+                          <div className="mt-2 pt-1 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-mono">
+                            <span className="text-emerald-400">
+                              {w.weightDeltaKg !== 0 ? `${w.weightDeltaKg > 0 ? '+' : ''}${w.weightDeltaKg} kg • ` : ''}
+                              {w.cost > 0 ? `+$${w.cost}` : 'Base $0'}
+                            </span>
+                            <span className="text-slate-400">R&D: {w.rdCost}</span>
                           </div>
                         </button>
                       );
@@ -1357,39 +1584,159 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
                   </div>
                 </div>
 
+                {/* B) Elettronica di Potenza (Inverter) */}
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-mono text-slate-300 uppercase tracking-wider block">
-                    Classe d’Uso Motore (Taratura Erogazione)
+                  <label className="text-[11px] font-mono text-slate-300 uppercase tracking-wider flex items-center justify-between">
+                    <span>B) Elettronica di Potenza (Inverter)</span>
+                    <span className="text-sky-400 font-normal">Semiconduttori e correnti di fase</span>
                   </label>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                    {REFERENCE_CLASSES.map((refCls) => {
-                      const cSpec = REFERENCE_CLASS_EV_SPECS[refCls];
-                      const isSelected = config.referenceClass === refCls;
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {INVERTER_POWER_ELECTRONICS_SPECS.map((inv) => {
+                      const isSelected = config.inverterPowerElectronics === inv.id;
                       return (
                         <button
-                          key={refCls}
+                          key={inv.id}
                           type="button"
-                          onClick={() =>
-                            setConfig((prev) => ({
-                              ...prev,
-                              referenceClass: refCls,
-                            }))
-                          }
+                          onClick={() => setConfig((prev) => ({ ...prev, inverterPowerElectronics: inv.id }))}
                           className={`p-2.5 rounded-lg border text-left transition cursor-pointer flex flex-col justify-between ${
                             isSelected
-                              ? 'bg-sky-950/60 border-sky-500 text-sky-100'
+                              ? 'bg-amber-950/60 border-amber-500 text-amber-100 ring-1 ring-amber-500/40'
+                              : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-bold text-xs">{inv.name}</span>
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-sky-300 shrink-0">
+                              {inv.efficiencyPercent}% Eff.
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">{inv.description}</p>
+                          <div className="mt-2 pt-1 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-mono">
+                            <span className="text-amber-300 font-bold">
+                              {inv.powerMultiplier >= 1.0 ? `+${Math.round((inv.powerMultiplier - 1) * 100)}%` : `${Math.round((inv.powerMultiplier - 1) * 100)}%`} CV/Nm
+                            </span>
+                            <span className="text-slate-400">${inv.cost}</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* C) Contenimento Rotore e Cuscinetti (Limitatore RPM e Attriti) */}
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-mono text-slate-300 uppercase tracking-wider flex items-center justify-between">
+                    <span>C) Contenimento Rotore e Cuscinetti</span>
+                    <span className="text-sky-400 font-normal">Limite centrifugo & attriti rotanti</span>
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    {ROTOR_SLEEVE_BEARING_SPECS.map((brg) => {
+                      const isSelected = config.rotorSleeveBearing === brg.id;
+                      return (
+                        <button
+                          key={brg.id}
+                          type="button"
+                          onClick={() => setConfig((prev) => ({ ...prev, rotorSleeveBearing: brg.id }))}
+                          className={`p-2.5 rounded-lg border text-left transition cursor-pointer flex flex-col justify-between ${
+                            isSelected
+                              ? 'bg-sky-950/60 border-sky-500 text-sky-100 ring-1 ring-sky-500/40'
+                              : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+                          }`}
+                        >
+                          <div className="font-bold text-xs flex items-center justify-between">
+                            <span>{brg.shortName}</span>
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-emerald-300">
+                              max {brg.maxSafeRpm.toLocaleString('it-IT')} RPM
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">{brg.description}</p>
+                          <div className="mt-2 pt-1 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-mono">
+                            <span className="text-emerald-400">
+                              {brg.weightDeltaKg !== 0 ? `${brg.weightDeltaKg} kg • ` : ''}
+                              {brg.cost > 0 ? `+$${brg.cost}` : 'Base $0'}
+                            </span>
+                            <span className="text-slate-400">+{brg.reliabilityDeltaPercent}% Affid.</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* D) Materiale Magneti / Gabbia Rotore */}
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-mono text-slate-300 uppercase tracking-wider flex items-center justify-between">
+                    <span>D) Materiale Magneti / Gabbia Rotore</span>
+                    <span className="text-sky-400 font-normal">Permeabilità & resistenza termica</span>
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {ROTOR_MAGNET_MATERIAL_SPECS.map((mag) => {
+                      const isSelected = config.rotorMagnetMaterial === mag.id;
+                      return (
+                        <button
+                          key={mag.id}
+                          type="button"
+                          onClick={() => setConfig((prev) => ({ ...prev, rotorMagnetMaterial: mag.id }))}
+                          className={`p-2.5 rounded-lg border text-left transition cursor-pointer flex flex-col justify-between ${
+                            isSelected
+                              ? 'bg-purple-950/60 border-purple-500 text-purple-100 ring-1 ring-purple-500/40'
                               : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
                           }`}
                         >
                           <div className="flex items-center justify-between gap-1">
-                            <span className="font-bold text-xs">Classe {refCls}</span>
-                            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-amber-300">
-                              CV ×{cSpec.powerMultiplier.toFixed(2)}
+                            <span className="font-bold text-xs">{mag.name}</span>
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-amber-300 shrink-0">
+                              {mag.torqueMultiplier >= 1.0 ? `+${Math.round((mag.torqueMultiplier - 1) * 100)}%` : `${Math.round((mag.torqueMultiplier - 1) * 100)}%`} Nm
                             </span>
                           </div>
-                          <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
-                            {cSpec.description}
-                          </p>
+                          <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">{mag.description}</p>
+                          <div className="mt-2 pt-1 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-mono">
+                            <span className="text-purple-300">
+                              {mag.cost !== 0 ? `${mag.cost > 0 ? '+$' : '-$'}${Math.abs(mag.cost)}` : 'Base $0'}
+                            </span>
+                            <span className="text-slate-400">Tenuta: {mag.thermalDemagnetizationResistance}</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* E) Carcassa Esterna e Isolamento */}
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-mono text-slate-300 uppercase tracking-wider flex items-center justify-between">
+                    <span>E) Carcassa Esterna e Isolamento</span>
+                    <span className="text-sky-400 font-normal">Protezione, NVH & peso strutturale</span>
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {MOTOR_HOUSING_SPECS.map((h) => {
+                      const isSelected = config.motorHousing === h.id;
+                      return (
+                        <button
+                          key={h.id}
+                          type="button"
+                          onClick={() => setConfig((prev) => ({ ...prev, motorHousing: h.id }))}
+                          className={`p-2.5 rounded-lg border text-left transition cursor-pointer flex flex-col justify-between ${
+                            isSelected
+                              ? 'bg-slate-900 border-sky-400 text-sky-100 ring-1 ring-sky-400/40'
+                              : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="font-bold text-xs">{h.name}</span>
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-sky-300 shrink-0">
+                              {h.weightDeltaKg > 0 ? `+${h.weightDeltaKg} kg` : h.weightDeltaKg < 0 ? `${h.weightDeltaKg} kg` : '0 kg'}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">{h.description}</p>
+                          <div className="mt-2 pt-1 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-mono">
+                            <span className="text-emerald-400 font-semibold">
+                              {h.cost > 0 ? `+$${h.cost}` : 'Base $0'}
+                            </span>
+                            <span className="text-slate-400">
+                              {h.nvhComfortScore > 0 ? `+${h.nvhComfortScore} NVH` : h.reliabilityDeltaPercent > 0 ? `+${h.reliabilityDeltaPercent}% Affid.` : 'Std'}
+                            </span>
+                          </div>
                         </button>
                       );
                     })}
@@ -1432,6 +1779,65 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
                   </div>
                 </div>
 
+                {/* Delta R&D Anti-Exploit Summary se siamo in Modalità Variante Motore */}
+                {motorVariantRdResult && (
+                  <div className="p-3.5 rounded-xl border font-mono text-xs space-y-2 bg-slate-950/90 border-amber-500/40">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-amber-300 flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Variante da: {motorVariantRdResult.parentName} ({motorVariantRdResult.parentCodeName})</span>
+                      </span>
+                      <span
+                        className={`px-2 py-0.5 rounded font-bold text-[10px] ${
+                          motorVariantRdResult.hasStructuralMoldChange
+                            ? 'bg-red-950 border border-red-500 text-red-300'
+                            : 'bg-emerald-950 border border-emerald-500 text-emerald-300'
+                        }`}
+                      >
+                        {motorVariantRdResult.hasStructuralMoldChange
+                          ? 'Strutturale (95% R&D)'
+                          : `-${motorVariantRdResult.savingsPercentage}% R&D`}
+                      </span>
+                    </div>
+
+                    {motorVariantRdResult.structuralWarning && (
+                      <div className="p-2 rounded bg-red-950/50 border border-red-900/60 text-red-300 text-[11px]">
+                        ⚠️ {motorVariantRdResult.structuralWarning}
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between pt-1 border-t border-slate-800 text-[11px]">
+                      <span className="text-slate-400">Costo R&D Pieno:</span>
+                      <span className="line-through text-slate-500">
+                        ${(motorVariantRdResult.baseDevelopmentCost.capitalCost / 1_000_000).toFixed(2)}M • {motorVariantRdResult.baseDevelopmentCost.rdCost} R&D
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-emerald-400 font-semibold">Costo Variante per Differenza:</span>
+                      <span className="font-bold text-emerald-300">
+                        ${(motorVariantRdResult.effectiveDevelopmentCost.capitalCost / 1_000_000).toFixed(2)}M • {motorVariantRdResult.effectiveDevelopmentCost.rdCost} R&D
+                      </span>
+                    </div>
+
+                    {motorVariantRdResult.detectedChanges.length > 0 && (
+                      <div className="pt-1.5 border-t border-slate-800/80 space-y-1">
+                        <div className="text-[10px] uppercase text-slate-400">
+                          Modifiche Rilevate ({motorVariantRdResult.detectedChanges.length}):
+                        </div>
+                        <div className="max-h-24 overflow-y-auto space-y-0.5 pr-1 text-[10px]">
+                          {motorVariantRdResult.detectedChanges.map((ch, idx) => (
+                            <div key={idx} className="flex items-center justify-between text-slate-300">
+                              <span>• {ch.label}</span>
+                              <span className="text-amber-400 font-semibold">+{ch.rdPercentage}%</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="flex items-center justify-between gap-3 pt-1">
                   <button
                     type="button"
@@ -1439,7 +1845,19 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
                     className="px-4 py-2 rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold font-mono text-xs flex items-center gap-2 cursor-pointer transition shadow-md shadow-sky-500/10"
                   >
                     <Save className="w-4 h-4" />
-                    <span>Salva Motore Singolo (${unitMotor.developmentCost.capitalCost.toLocaleString('it-IT')} • {unitMotor.developmentCost.rdCost} R&D)</span>
+                    <span>
+                      {motorVariantRdResult ? 'Salva Variante Motore' : 'Salva Motore Singolo'} (-$
+                      {(
+                        (motorVariantRdResult
+                          ? motorVariantRdResult.effectiveDevelopmentCost.capitalCost
+                          : unitMotor.developmentCost.capitalCost) / 1_000_000
+                      ).toFixed(2)}
+                      M / -
+                      {motorVariantRdResult
+                        ? motorVariantRdResult.effectiveDevelopmentCost.rdCost
+                        : unitMotor.developmentCost.rdCost}{' '}
+                      R&D)
+                    </span>
                   </button>
 
                   <button
@@ -1473,6 +1891,11 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
                             <div className="text-[10px] text-sky-300">
                               {m.peakPowerHp} CV • {m.peakTorqueNm} Nm • {m.dryWeightKg} kg • ${m.unitProductionCost.toLocaleString('it-IT')}
                             </div>
+                            {m.isVariant && (
+                              <div className="text-[10px] text-amber-400 font-semibold mt-0.5">
+                                ↳ Variante da {m.parentMotorName || 'Progetto Base'} (-{m.variantRdSavingsPercent ?? 0}% R&D)
+                              </div>
+                            )}
                           </div>
                           <div className="flex items-center gap-2 pt-1 border-t border-slate-800/60">
                             <button
@@ -1483,7 +1906,26 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
                               }}
                               className="flex-1 px-2 py-1 rounded bg-sky-500/20 hover:bg-sky-500/30 text-sky-200 text-[10px] font-bold text-center cursor-pointer"
                             >
-                              Monta al Banco Prova →
+                              Monta al Banco →
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                startVariant({
+                                  type: 'electricMotor',
+                                  id: m.id,
+                                  name: m.name,
+                                  codeName: m.codeName,
+                                  entity: m,
+                                });
+                                loadMotorToBench(m);
+                                setMotorLibName(`${m.name} Evo`);
+                                setMotorLibCode(`${m.codeName}-EVO`);
+                                window.scrollTo({ top: 0, behavior: 'smooth' });
+                              }}
+                              className="px-2 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-[10px] font-bold cursor-pointer"
+                            >
+                              Crea Variante
                             </button>
                             <button
                               type="button"
@@ -1507,6 +1949,26 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
           {/* =============================================================== */}
           {activeSubPanel === 'battery' && (
             <div className="space-y-6">
+              {/* Banner Modalità Variante Pacco Batteria attiva */}
+              {activeVariantParent && activeVariantParent.type === 'batteryPack' && (
+                <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between font-mono text-xs">
+                  <div className="flex items-center gap-2 text-amber-300">
+                    <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>
+                      <strong>Modalità Variante Attiva da:</strong> {activeVariantParent.name} (
+                      {activeVariantParent.codeName}) — Calcolo R&D Delta Anti-Exploit
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={clearVariant}
+                    className="px-2.5 py-1 rounded bg-slate-900 border border-slate-700 text-slate-300 hover:text-white hover:border-slate-500 cursor-pointer text-[11px]"
+                  >
+                    Annulla Modalità Variante
+                  </button>
+                </div>
+              )}
+
               {/* Banner descrittivo Pannello 2 */}
               <div className="p-4 rounded-xl border border-emerald-500/40 bg-emerald-950/20 space-y-1">
                 <div className="flex items-center gap-2">
@@ -1754,13 +2216,154 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
                 </div>
               </section>
 
-              {/* 4. Salvataggio Pacco Batteria nella Libreria Componenti */}
+              {/* 4. Architettura Strutturale, BMS & Protezione Pacco Batteria */}
+              <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-5">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <div className="flex items-center gap-2">
+                    <Shield className="w-4 h-4 text-emerald-400" />
+                    <span className="text-xs font-bold font-mono uppercase tracking-wider text-slate-200">
+                      4. Architettura Strutturale, BMS & Protezione Pacco
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 text-[10px] font-mono">
+                    <span className="px-1.5 py-0.5 rounded bg-slate-800 text-emerald-300">
+                      Fascia: {deriveBatteryPackTaxonomy(config.packStructure, config.bmsCalibration, config.underbodyShield).priceTier}
+                    </span>
+                    <span className="px-1.5 py-0.5 rounded bg-slate-800 text-sky-300">
+                      Classe: {deriveBatteryPackTaxonomy(config.packStructure, config.bmsCalibration, config.underbodyShield).referenceClass}
+                    </span>
+                  </div>
+                </div>
+
+                {/* A) Struttura e Connessioni Pacco */}
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-mono text-slate-300 uppercase tracking-wider flex items-center justify-between">
+                    <span>A) Struttura e Connessioni Pacco</span>
+                    <span className="text-emerald-400 font-normal">Integrazione telaio & rigidità strutturale</span>
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {BATTERY_PACK_STRUCTURE_SPECS.map((st) => {
+                      const isSelected = config.packStructure === st.id;
+                      return (
+                        <button
+                          key={st.id}
+                          type="button"
+                          onClick={() => setConfig((prev) => ({ ...prev, packStructure: st.id }))}
+                          className={`p-2.5 rounded-lg border text-left transition cursor-pointer flex flex-col justify-between ${
+                            isSelected
+                              ? 'bg-emerald-950/60 border-emerald-500 text-emerald-100 ring-1 ring-emerald-500/40'
+                              : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="font-bold text-xs">{st.name}</span>
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-emerald-300 shrink-0">
+                              {st.weightMultiplier < 1.0 ? `${Math.round((st.weightMultiplier - 1) * 100)}%` : `+${Math.round((st.weightMultiplier - 1) * 100)}%`} Peso
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">{st.description}</p>
+                          <div className="mt-2 pt-1 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-mono">
+                            <span className="text-emerald-400">
+                              {st.cost > 0 ? `+$${st.cost.toLocaleString('it-IT')}` : 'Base $0'}
+                            </span>
+                            <span className="text-slate-400">R&D: {st.rdCost}</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* B) Taratura BMS, Buffer di Sicurezza e Scarica (C-Rate) */}
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-mono text-slate-300 uppercase tracking-wider flex items-center justify-between">
+                    <span>B) Taratura BMS, Buffer di Sicurezza e Scarica (C-Rate)</span>
+                    <span className="text-emerald-400 font-normal">Buffer utile vs Potenza scarica impulsiva</span>
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {BMS_CALIBRATION_SPECS.map((bms) => {
+                      const isSelected = config.bmsCalibration === bms.id;
+                      return (
+                        <button
+                          key={bms.id}
+                          type="button"
+                          onClick={() => setConfig((prev) => ({ ...prev, bmsCalibration: bms.id }))}
+                          className={`p-2.5 rounded-lg border text-left transition cursor-pointer flex flex-col justify-between ${
+                            isSelected
+                              ? 'bg-sky-950/60 border-sky-500 text-sky-100 ring-1 ring-sky-500/40'
+                              : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="font-bold text-xs">{bms.name}</span>
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-amber-300 shrink-0">
+                              Buffer {bms.bufferPercent}%
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">{bms.description}</p>
+                          <div className="mt-2 pt-1 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-mono">
+                            <span className="text-sky-300 font-semibold">
+                              {bms.maxCRateMultiplier}C Max Scarica
+                            </span>
+                            <span className={bms.lifespanMultiplier >= 1.0 ? 'text-emerald-400' : 'text-red-400'}>
+                              {bms.lifespanMultiplier >= 1.0 ? `×${bms.lifespanMultiplier}` : `×${bms.lifespanMultiplier}`} Durata
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* C) Protezione Sottoscocca */}
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-mono text-slate-300 uppercase tracking-wider flex items-center justify-between">
+                    <span>C) Protezione Sottoscocca</span>
+                    <span className="text-emerald-400 font-normal">Resistenza impatti dal fondo stradale</span>
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {UNDERBODY_SHIELD_SPECS.map((sh) => {
+                      const isSelected = config.underbodyShield === sh.id;
+                      return (
+                        <button
+                          key={sh.id}
+                          type="button"
+                          onClick={() => setConfig((prev) => ({ ...prev, underbodyShield: sh.id }))}
+                          className={`p-2.5 rounded-lg border text-left transition cursor-pointer flex flex-col justify-between ${
+                            isSelected
+                              ? 'bg-emerald-950/60 border-emerald-500 text-emerald-100 ring-1 ring-emerald-500/40'
+                              : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="font-bold text-xs">{sh.name}</span>
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-sky-300 shrink-0">
+                              {sh.weightKg > 0 ? `+${sh.weightKg} kg` : '0 kg'}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">{sh.description}</p>
+                          <div className="mt-2 pt-1 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-mono">
+                            <span className="text-emerald-400">
+                              {sh.cost > 0 ? `+$${sh.cost}` : 'Base $0'}
+                            </span>
+                            <span className="text-slate-400">
+                              {sh.reliabilityDeltaPercent > 0 ? `+${sh.reliabilityDeltaPercent}% Affid. Gravosa` : 'Standard'}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </section>
+
+              {/* 5. Salvataggio Pacco Batteria nella Libreria Componenti */}
               <section className="rounded-xl border border-emerald-500/50 bg-emerald-950/10 p-4 space-y-4">
                 <div className="flex items-center justify-between border-b border-emerald-800/60 pb-2">
                   <div className="flex items-center gap-2">
                     <Save className="w-4 h-4 text-emerald-400" />
                     <h3 className="text-xs font-bold font-mono uppercase tracking-wider text-emerald-200">
-                      4. Salvataggio Pacco Batteria nella Libreria
+                      5. Salvataggio Pacco Batteria nella Libreria
                     </h3>
                   </div>
                   <span className="text-[11px] font-mono text-emerald-300 font-semibold">
@@ -1789,6 +2392,65 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
                   </div>
                 </div>
 
+                {/* Delta R&D Anti-Exploit Summary se siamo in Modalità Variante Batteria */}
+                {batteryVariantRdResult && (
+                  <div className="p-3.5 rounded-xl border font-mono text-xs space-y-2 bg-slate-950/90 border-amber-500/40">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-amber-300 flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Variante da: {batteryVariantRdResult.parentName} ({batteryVariantRdResult.parentCodeName})</span>
+                      </span>
+                      <span
+                        className={`px-2 py-0.5 rounded font-bold text-[10px] ${
+                          batteryVariantRdResult.hasStructuralMoldChange
+                            ? 'bg-red-950 border border-red-500 text-red-300'
+                            : 'bg-emerald-950 border border-emerald-500 text-emerald-300'
+                        }`}
+                      >
+                        {batteryVariantRdResult.hasStructuralMoldChange
+                          ? 'Chimica Base (95% R&D)'
+                          : `-${batteryVariantRdResult.savingsPercentage}% R&D`}
+                      </span>
+                    </div>
+
+                    {batteryVariantRdResult.structuralWarning && (
+                      <div className="p-2 rounded bg-red-950/50 border border-red-900/60 text-red-300 text-[11px]">
+                        ⚠️ {batteryVariantRdResult.structuralWarning}
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between pt-1 border-t border-slate-800 text-[11px]">
+                      <span className="text-slate-400">Costo R&D Pieno:</span>
+                      <span className="line-through text-slate-500">
+                        ${(batteryVariantRdResult.baseDevelopmentCost.capitalCost / 1_000_000).toFixed(2)}M • {batteryVariantRdResult.baseDevelopmentCost.rdCost} R&D
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-emerald-400 font-semibold">Costo Variante per Differenza:</span>
+                      <span className="font-bold text-emerald-300">
+                        ${(batteryVariantRdResult.effectiveDevelopmentCost.capitalCost / 1_000_000).toFixed(2)}M • {batteryVariantRdResult.effectiveDevelopmentCost.rdCost} R&D
+                      </span>
+                    </div>
+
+                    {batteryVariantRdResult.detectedChanges.length > 0 && (
+                      <div className="pt-1.5 border-t border-slate-800/80 space-y-1">
+                        <div className="text-[10px] uppercase text-slate-400">
+                          Modifiche Rilevate ({batteryVariantRdResult.detectedChanges.length}):
+                        </div>
+                        <div className="max-h-24 overflow-y-auto space-y-0.5 pr-1 text-[10px]">
+                          {batteryVariantRdResult.detectedChanges.map((ch, idx) => (
+                            <div key={idx} className="flex items-center justify-between text-slate-300">
+                              <span>• {ch.label}</span>
+                              <span className="text-amber-400 font-semibold">+{ch.rdPercentage}%</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="flex items-center justify-between gap-3 pt-1">
                   <button
                     type="button"
@@ -1796,7 +2458,19 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
                     className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold font-mono text-xs flex items-center gap-2 cursor-pointer transition shadow-md shadow-emerald-500/10"
                   >
                     <Save className="w-4 h-4" />
-                    <span>Salva Pacco Batteria (${batteryPack.developmentCost.capitalCost.toLocaleString('it-IT')} • {batteryPack.developmentCost.rdCost} R&D)</span>
+                    <span>
+                      {batteryVariantRdResult ? 'Salva Variante Batteria' : 'Salva Pacco Batteria'} (-$
+                      {(
+                        (batteryVariantRdResult
+                          ? batteryVariantRdResult.effectiveDevelopmentCost.capitalCost
+                          : batteryPack.developmentCost.capitalCost) / 1_000_000
+                      ).toFixed(2)}
+                      M / -
+                      {batteryVariantRdResult
+                        ? batteryVariantRdResult.effectiveDevelopmentCost.rdCost
+                        : batteryPack.developmentCost.rdCost}{' '}
+                      R&D)
+                    </span>
                   </button>
 
                   <button
@@ -1830,6 +2504,11 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
                             <div className="text-[10px] text-emerald-300">
                               {b.spec.batteryCapacityKwh} kWh {b.spec.batteryChemistry} • {b.maxDischargePowerKw} kW • {b.weightKg} kg • ${b.unitProductionCost.toLocaleString('it-IT')}
                             </div>
+                            {b.isVariant && (
+                              <div className="text-[10px] text-amber-400 font-semibold mt-0.5">
+                                ↳ Variante da {b.parentBatteryName || 'Progetto Base'} (-{b.variantRdSavingsPercent ?? 0}% R&D)
+                              </div>
+                            )}
                           </div>
                           <div className="flex items-center gap-2 pt-1 border-t border-slate-800/60">
                             <button
@@ -1840,7 +2519,26 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
                               }}
                               className="flex-1 px-2 py-1 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 text-[10px] font-bold text-center cursor-pointer"
                             >
-                              Monta al Banco Prova →
+                              Monta al Banco →
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                startVariant({
+                                  type: 'batteryPack',
+                                  id: b.id,
+                                  name: b.name,
+                                  codeName: b.codeName,
+                                  entity: b,
+                                });
+                                loadBatteryToBench(b);
+                                setBatteryLibName(`${b.name} Evo`);
+                                setBatteryLibCode(`${b.codeName}-EVO`);
+                                window.scrollTo({ top: 0, behavior: 'smooth' });
+                              }}
+                              className="px-2 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-[10px] font-bold cursor-pointer"
+                            >
+                              Crea Variante
                             </button>
                             <button
                               type="button"
@@ -2007,10 +2705,21 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
                         2. Motore Termico / Wankel Accoppiato al Sistema Ibrido
                       </h2>
                     </div>
-                    <span className="text-[11px] font-mono text-amber-300 font-semibold">
-                      {selectedCoupledIce.name} ({selectedCoupledIce.peakPowerHp} CV /{' '}
-                      {selectedCoupledIce.peakTorqueNm} Nm)
-                    </span>
+                    <div className="flex items-center gap-2 font-mono text-[11px]">
+                      <span className="text-amber-300 font-semibold">
+                        {selectedCoupledIce.name} ({selectedCoupledIce.peakPowerHp} CV /{' '}
+                        {selectedCoupledIce.peakTorqueNm} Nm)
+                      </span>
+                      <span
+                        className={`px-2 py-0.5 rounded border text-[10px] font-bold ${
+                          selectedCoupledIce.intendedOrientation === 'Trasversale'
+                            ? 'bg-sky-950/80 border-sky-600 text-sky-300'
+                            : 'bg-amber-950/80 border-amber-600 text-amber-300'
+                        }`}
+                      >
+                        {selectedCoupledIce.intendedOrientation}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 font-mono text-xs">
@@ -2029,15 +2738,26 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
                         >
                           <div className="flex items-start justify-between gap-2">
                             <span className="font-bold text-xs truncate text-slate-100">{ice.name}</span>
-                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-amber-300 shrink-0">
-                              {ice.sourceKind === 'LivePiston1A'
-                                ? 'LIVE 1A'
-                                : ice.sourceKind === 'LiveWankel1B'
-                                  ? 'LIVE 1B'
-                                  : ice.sourceKind === 'SavedDatabase'
-                                    ? 'DATABASE'
-                                    : 'STOCK'}
-                            </span>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <span
+                                className={`text-[9px] px-1.5 py-0.5 rounded border font-mono font-semibold ${
+                                  ice.intendedOrientation === 'Trasversale'
+                                    ? 'bg-sky-950/80 border-sky-600 text-sky-300'
+                                    : 'bg-amber-950/80 border-amber-600 text-amber-300'
+                                }`}
+                              >
+                                {ice.intendedOrientation}
+                              </span>
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-amber-300">
+                                {ice.sourceKind === 'LivePiston1A'
+                                  ? 'LIVE 1A'
+                                  : ice.sourceKind === 'LiveWankel1B'
+                                    ? 'LIVE 1B'
+                                    : ice.sourceKind === 'SavedDatabase'
+                                      ? 'DATABASE'
+                                      : 'STOCK'}
+                              </span>
+                            </div>
                           </div>
                           <div className="text-[10px] text-slate-400 mt-1">{ice.architectureLabel}</div>
                           <div className="mt-2.5 pt-1.5 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-bold">
@@ -2066,11 +2786,11 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
                   </span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                  {MOTOR_LAYOUT_CONFIGS.map((lay) => {
-                    const isSelected = config.motorLayout === lay.id;
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                  {BENCH_MOTOR_SCALING_CONFIGS.map((lay) => {
+                    const isSelected = config.motorLayout === lay.layoutId;
                     const effectivePenaltyPct =
-                      lay.id === 'DualMotor_eAWD' && (isAsm || config.hasFrontDisconnect)
+                      lay.motorCount > 1 && (isAsm || config.hasFrontDisconnect)
                         ? '+2.0% consumo (Low-Drag)'
                         : lay.consumptionPenaltyMultiplier === 1.0
                           ? 'Rif. Ottimale (0% pen.)'
@@ -2078,19 +2798,25 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
 
                     return (
                       <button
-                        key={lay.id}
+                        key={lay.layoutId}
                         type="button"
-                        onClick={() => setConfig((prev) => ({ ...prev, motorLayout: lay.id }))}
-                        className={`p-2.5 rounded-lg border text-left transition cursor-pointer flex flex-col justify-between ${
+                        onClick={() =>
+                          setConfig((prev) => ({
+                            ...prev,
+                            motorLayout: lay.layoutId,
+                            motorCount: lay.motorCount,
+                          }))
+                        }
+                        className={`p-3 rounded-lg border text-left transition cursor-pointer flex flex-col justify-between ${
                           isSelected
-                            ? 'bg-sky-950/60 border-sky-500 text-sky-100'
+                            ? 'bg-sky-950/60 border-sky-500 text-sky-100 ring-1 ring-sky-500/50 shadow-md shadow-sky-500/10'
                             : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
                         }`}
                       >
                         <div className="flex items-start justify-between gap-1">
                           <span className="font-bold text-xs">{lay.name}</span>
                           <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-amber-300 shrink-0">
-                            {lay.typicalHpRangeLabel}
+                            {lay.multiplierLabel}
                           </span>
                         </div>
                         <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
@@ -2636,26 +3362,36 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
                 <div className="flex items-center gap-2">
                   <Box className="w-4 h-4 text-sky-400" />
                   <h3 className="text-xs font-bold font-mono uppercase tracking-wider text-slate-200">
-                    CAD 3D & Ingombro Vano Motore Powertrain
+                    {config.systemType === 'PureEV'
+                      ? 'CAD 3D & Ingombro Powertrain BEV'
+                      : 'CAD 3D & Ingombro Powertrain Ibrido'}
                   </h3>
                 </div>
-                <div className="flex items-center gap-2 font-mono text-xs">
-                  <label className="text-[11px] text-slate-400">Orientamento:</label>
-                  <select
-                    value={intendedOrientation}
-                    onChange={(e) => setIntendedOrientation(e.target.value as EngineOrientation)}
-                    className="px-2 py-0.5 rounded bg-slate-950 border border-slate-700 text-sky-300 text-xs"
-                  >
-                    <option value="Trasversale">Trasversale</option>
-                    <option value="Longitudinale">Longitudinale</option>
-                  </select>
-                </div>
+                {config.systemType === 'PureEV' ? (
+                  <div className="flex items-center gap-1.5 font-mono text-[11px] text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-2.5 py-1 rounded">
+                    <span>Powertrain BEV E-AWD (Zero Vincoli Albero)</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 font-mono text-xs">
+                    <span className="text-[11px] text-slate-400">Orientamento Termico:</span>
+                    <span
+                      className={`px-2.5 py-0.5 rounded border font-bold text-xs ${
+                        effectiveOrientation === 'Trasversale'
+                          ? 'bg-sky-950 border-sky-500 text-sky-300'
+                          : 'bg-amber-950 border-amber-500 text-amber-300'
+                      }`}
+                    >
+                      {effectiveOrientation}
+                    </span>
+                  </div>
+                )}
               </div>
 
               <VolumeViewer3D
                 engineInBayDimensionsMm={geometry.engineBayDimensionsMm}
-                rawEngineDimensionsMm={geometry.engineBayDimensionsMm}
+                rawEngineDimensionsMm={geometry.rawDimensionsMm ?? geometry.engineBayDimensionsMm}
                 electricConfig={effectiveConfig}
+                intendedOrientation={effectiveOrientation}
                 engineType="ElectricHybrid"
                 overlaidChassisBays={overlaidChassisBays}
               />
@@ -2667,7 +3403,7 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
                     <span>Seleziona Pianali da Sovrapporre nel 3D:</span>
                   </span>
                   <span>
-                    Vano: {geometry.engineBayDimensionsMm.lengthMm}×
+                    Ingombro: {geometry.engineBayDimensionsMm.lengthMm}×
                     {geometry.engineBayDimensionsMm.widthMm}×
                     {geometry.engineBayDimensionsMm.heightMm} mm
                   </span>
