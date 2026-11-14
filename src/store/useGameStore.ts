@@ -12,6 +12,7 @@ import {
   WANKEL_HOUSING_MATERIALS,
   WANKEL_PORTING_TYPES,
 } from '../data/historicalEras';
+import { CHASSIS_STRUCTURES } from '../data/chassisData';
 import {
   type BatteryPackEntity,
   type ChassisEntity,
@@ -41,11 +42,11 @@ export interface DualCurrencyGateResult {
 }
 
 export interface ActiveVariantParentInfo {
-  type: 'piston' | 'wankel' | 'electricMotor' | 'batteryPack';
+  type: 'piston' | 'wankel' | 'electricMotor' | 'batteryPack' | 'chassis';
   id: string;
   name: string;
   codeName: string;
-  entity: EngineEntity | ElectricMotorEntity | BatteryPackEntity;
+  entity: EngineEntity | ElectricMotorEntity | BatteryPackEntity | ChassisEntity;
 }
 
 export interface TransactionLogEntry {
@@ -100,6 +101,7 @@ export interface GameState {
   setLiveWankelDraft: (draft: CoupledIceEngineOption) => void;
   saveElectricMotorToLibrary: (motor: ElectricMotorEntity) => DualCurrencyGateResult;
   saveBatteryPackToLibrary: (pack: BatteryPackEntity) => DualCurrencyGateResult;
+  saveChassisToDatabase: (chassis: ChassisEntity) => DualCurrencyGateResult;
 
   // Azioni Database Modulare
   addCustomComponent: (params: {
@@ -128,6 +130,7 @@ const defaultUnlockedParts = [
   ...WANKEL_PORTING_TYPES,
   ...WANKEL_HOUSING_MATERIALS,
   ...OIL_METERING_SYSTEMS,
+  ...CHASSIS_STRUCTURES,
 ]
   .filter((p) => p.defaultUnlocked)
   .map((p) => p.id);
@@ -850,6 +853,19 @@ export const useGameStore = create<GameState>((set, get) => ({
 
     set((state) => ({
       engines: [engine, ...state.engines],
+    }));
+    return gate;
+  },
+
+  saveChassisToDatabase: (chassis) => {
+    const gate = get().spendDualCurrency(
+      `Omologazione Pianale: ${chassis.name} (${chassis.codeName})`,
+      chassis.developmentCost,
+    );
+    if (!gate.allowed) return gate;
+
+    set((state) => ({
+      chassisList: [chassis, ...state.chassisList],
     }));
     return gate;
   },

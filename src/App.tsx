@@ -10,6 +10,7 @@ import {
   RotateCw,
   Zap,
 } from 'lucide-react';
+import { ChassisDesigner21 } from './components/chassis/ChassisDesigner21';
 import { ElectricHybridDesigner1C } from './components/engine-lab/ElectricHybridDesigner1C';
 import { PistonEngineDesigner1A } from './components/engine-lab/PistonEngineDesigner1A';
 import { WankelEngineDesigner1B } from './components/engine-lab/WankelEngineDesigner1B';
@@ -19,6 +20,7 @@ type ActiveSection =
   | 'engine-lab-1a'
   | 'engine-lab-1b'
   | 'engine-lab-1c'
+  | 'chassis-21'
   | 'database-overview';
 
 export const App: React.FC = () => {
@@ -114,6 +116,18 @@ export const App: React.FC = () => {
             </button>
             <button
               type="button"
+              onClick={() => setActiveSection('chassis-21')}
+              className={`px-3.5 py-2 rounded-lg border flex items-center gap-2 transition cursor-pointer ${
+                activeSection === 'chassis-21'
+                  ? 'bg-indigo-500/20 border-indigo-500 text-indigo-300 font-bold'
+                  : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+              }`}
+            >
+              <Layers className="w-4 h-4" />
+              <span>Fase 2.1: Pianali ({chassisList.length})</span>
+            </button>
+            <button
+              type="button"
               onClick={() => setActiveSection('database-overview')}
               className={`px-3.5 py-2 rounded-lg border flex items-center gap-2 transition cursor-pointer ${
                 activeSection === 'database-overview'
@@ -198,6 +212,8 @@ export const App: React.FC = () => {
             onSwitchToPiston={() => setActiveSection('engine-lab-1a')}
             onSwitchToWankel={() => setActiveSection('engine-lab-1b')}
           />
+        ) : activeSection === 'chassis-21' ? (
+          <ChassisDesigner21 />
         ) : (
           <div className="space-y-6">
             {/* Database Relazionale Modulare: Le 5 Entità Indipendenti */}
@@ -256,6 +272,24 @@ export const App: React.FC = () => {
                       </div>
                       <div className="text-[11px] text-sky-300">
                         {ch.supportedEngineOrientations.join('/')} • Seg. {ch.calculatedSegment}
+                      </div>
+                      <div className="pt-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            startVariant({
+                              type: 'chassis',
+                              id: ch.id,
+                              name: ch.name,
+                              codeName: ch.codeName,
+                              entity: ch,
+                            });
+                            setActiveSection('chassis-21');
+                          }}
+                          className="w-full py-1 px-2 rounded bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 text-[10px] font-bold uppercase tracking-wider transition cursor-pointer"
+                        >
+                          Crea Variante / Evo
+                        </button>
                       </div>
                     </div>
                   ))}

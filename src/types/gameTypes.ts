@@ -781,6 +781,17 @@ export type AWDLayoutType =
 
 export type VehicleSegment = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'S' | 'J_SUV' | 'M_Pickup';
 
+export type GearboxLayoutType =
+  | 'InBlockWithEngine'
+  | 'RearTransaxleTorqueTube'
+  | 'MidCentralTunnel';
+
+export type ChassisDrivetrainMode =
+  | 'FWD_Only'
+  | 'FWD_AWD_Ready'
+  | 'RWD_Only'
+  | 'RWD_AWD_Ready';
+
 export interface ChassisEntity {
   id: string;
   name: string;
@@ -811,6 +822,15 @@ export interface ChassisEntity {
   /** Grado di arretramento del motore verso l'abitacolo (0% - 100%) */
   engineSetbackPercent: number;
   supportedDrivetrains: ('FWD' | 'RWD' | 'AWD')[];
+  drivetrainMode?: ChassisDrivetrainMode;
+  allowLongitudinalFwd?: boolean;
+  gearboxLayout?: GearboxLayoutType;
+  estimatedWeightDistribution2WD?: { frontPercent: number; rearPercent: number };
+  estimatedWeightDistributionAWD?: { frontPercent: number; rearPercent: number };
+  cargoVolumeDeltaLiters?: number;
+  centerOfGravityDeltaMm?: number;
+  maxSupportedEngineTorqueNm?: number;
+  maxSupportedEngineWeightKg?: number;
   /** Segmento auto calcolato automaticamente rispetto agli standard dell'anno corrente */
   calculatedSegment: VehicleSegment;
   baseWeightKg: number;

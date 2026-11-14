@@ -113,12 +113,12 @@ src/
 **Obiettivo:** Sviluppare l'ingegneria telaistica, la trasmissione personalizzabile, il motore fisico-telemetrico completo (`chassisMath.ts`) e la gestione delle stirpi di modelli.
 
 ### 2.1 Creazione Pianale e Layout Motore
-- [ ] Configuratore Pianale riutilizzabile ed evolubile (stile Piattaforma Giorgio):
-  - [ ] Dimensioni esterne, passo, carreggiata, altezza da terra.
-  - [ ] Rigidità torsionale ($\text{Nm/grado}$) e struttura di sicurezza.
-  - [ ] Posizione motore (`Anteriore`, `Anteriore-Centrale`, `Centrale-Posteriore`, `Posteriore`), orientamento (`Trasversale` o `Longitudinale`) e grado di arretramento verso l'abitacolo.
-  - [ ] Predisposizione trazione.
-- [ ] Algoritmo di calcolo automatico del **Segmento dell'auto** confrontando le dimensioni del pianale con gli standard dell'anno corrente (con soglie dimensionali che crescono a scaglioni ogni $X$ anni).
+- [x] Configuratore Pianale riutilizzabile ed evolubile (stile Piattaforma Giorgio):
+  - [x] Dimensioni esterne, passo, carreggiata, altezza da terra.
+  - [x] Rigidità torsionale ($\text{Nm/grado}$) e struttura di sicurezza.
+  - [x] Posizione motore (`Anteriore`, `Anteriore-Centrale`, `Centrale-Posteriore`, `Posteriore`), orientamento (`Trasversale` o `Longitudinale`) e grado di arretramento verso l'abitacolo.
+  - [x] Predisposizione trazione.
+- [x] Algoritmo di calcolo automatico del **Segmento dell'auto** confrontando le dimensioni del pianale con gli standard dell'anno corrente (con soglie dimensionali che crescono a scaglioni ogni $X$ anni).
 
 ### 2.2 Scocca e Sicurezza
 - [ ] **Configuratore Aerodinamico (Downforce vs Drag)**: selezione e regolazione incidenza (gradi) di Splitter/Canard anteriori, Ala posteriore, Fondo piatto/Diffusore ad effetto suolo (sensibile all'altezza da terra) e Aerodinamica Attiva (DRS/Flap mobili che riducono il Cx in rettilineo e massimizzano il carico in curva e staccata).

@@ -905,8 +905,8 @@ export function calculatePlatformVariantRdCost(
   let hasStructuralMoldChange = false;
 
   // Modifica posizione vano motore (Anteriore vs Posteriore vs Centrale)
-  const posA = current.supportedEnginePositions.sort().join(',');
-  const posB = parentChassis.supportedEnginePositions.sort().join(',');
+  const posA = [...current.supportedEnginePositions].sort().join(',');
+  const posB = [...parentChassis.supportedEnginePositions].sort().join(',');
   if (posA !== posB) {
     hasStructuralMoldChange = true;
     changes.push({
