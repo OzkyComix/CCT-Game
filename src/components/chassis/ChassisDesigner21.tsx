@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
-  Box,
   CheckCircle2,
   Compass,
   Gauge,
@@ -31,6 +30,7 @@ import type {
   EngineOrientation,
   GearboxLayoutType,
 } from '../../types/gameTypes';
+import { Chassis3DViewport } from './Chassis3DViewport';
 
 const ENGINE_POSITIONS: EngineMountingPosition[] = [
   'Anteriore',
@@ -295,7 +295,9 @@ export const ChassisDesigner21: React.FC = () => {
   ) => {
     const canLongFwd = pos === 'Anteriore' && ori === 'Longitudinale' && setback <= 35;
     const effectiveLongFwd = canLongFwd ? allowLongFwd : false;
-    const isFwd = (pos === 'Anteriore' && ori === 'Trasversale') || effectiveLongFwd;
+    const isFwd =
+      ((pos === 'Anteriore' || pos === 'Anteriore-Centrale') && ori === 'Trasversale') ||
+      effectiveLongFwd;
     const drivetrainMode: ChassisDrivetrainMode = isFwd
       ? wantAwd
         ? 'FWD_AWD_Ready'
@@ -316,7 +318,7 @@ export const ChassisDesigner21: React.FC = () => {
       supportedEngineOrientations: [ori] as EngineOrientation[],
       engineSetbackPercent: setback,
       allowLongitudinalFwd: effectiveLongFwd,
-      drivetrainMode,
+      drivetrainMode: rules.effectiveDrivetrainMode,
       gearboxLayout: rules.effectiveGearboxLayout,
       supportedDrivetrains: rules.resolvedDrivetrains,
     };
@@ -407,33 +409,6 @@ export const ChassisDesigner21: React.FC = () => {
       });
     }
   };
-
-  // Parametri SVG Blueprint proporzionati
-  const svgWidth = 500;
-  const svgHeight = 200;
-  const scalePxPerMm = 0.082;
-  const carLenPx = effectiveConfig.overallDimensionsMm.lengthMm * scalePxPerMm;
-  const carWidthPx = effectiveConfig.overallDimensionsMm.widthMm * scalePxPerMm;
-  const wbPx = effectiveConfig.wheelbaseMm * scalePxPerMm;
-  const frontOverhangPx = metrics.frontOverhangMm * scalePxPerMm;
-  const startX = (svgWidth - carLenPx) / 2;
-  const frontAxleX = startX + frontOverhangPx;
-  const rearAxleX = frontAxleX + wbPx;
-  const centerY = svgHeight / 2;
-
-  // Posizione blocco vano motore nello schema top-down
-  const bayLenPx = metrics.engineBayMaxDimensionsMm.lengthMm * scalePxPerMm;
-  const bayWidthPx = metrics.engineBayMaxDimensionsMm.widthMm * scalePxPerMm;
-  let bayCenterX = frontAxleX;
-  if (effectiveConfig.supportedEnginePositions.includes('Centrale-Posteriore')) {
-    bayCenterX = rearAxleX - bayLenPx * 0.65 - 14;
-  } else if (effectiveConfig.supportedEnginePositions.includes('Posteriore')) {
-    bayCenterX = rearAxleX + 10;
-  } else if (effectiveConfig.supportedEnginePositions.includes('Anteriore-Centrale')) {
-    bayCenterX = frontAxleX + (effectiveConfig.engineSetbackPercent / 100) * 26;
-  } else {
-    bayCenterX = frontAxleX - 10 + (effectiveConfig.engineSetbackPercent / 100) * 22;
-  }
 
   return (
     <div className="space-y-6">
@@ -1241,169 +1216,14 @@ export const ChassisDesigner21: React.FC = () => {
             </div>
           </div>
 
-          {/* Card Blueprint SVG Interattivo */}
-          <div className="rounded-xl border border-slate-800 bg-slate-900/75 p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-300">
-                <Box className="w-4 h-4 text-sky-400" />
-                <span>Blueprint Pianale & Vano Motore</span>
-              </div>
-              <span className="text-[10px] font-mono text-sky-300">
-                Vano: {metrics.engineBayMaxDimensionsMm.lengthMm}×
-                {metrics.engineBayMaxDimensionsMm.widthMm}×
-                {metrics.engineBayMaxDimensionsMm.heightMm} mm
-              </span>
-            </div>
-
-            <div className="rounded-lg bg-slate-950 border border-slate-800 p-2 overflow-hidden">
-              <svg
-                viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-                className="w-full h-44"
-                role="img"
-                aria-label="Blueprint tecnico del pianale"
-              >
-                {/* Griglia tecnica */}
-                <defs>
-                  <pattern id="grid21" width="20" height="20" patternUnits="userSpaceOnUse">
-                    <path
-                      d="M 20 0 L 0 0 0 20"
-                      fill="none"
-                      stroke="#1e293b"
-                      strokeWidth="0.6"
-                    />
-                  </pattern>
-                </defs>
-                <rect width={svgWidth} height={svgHeight} fill="url(#grid21)" />
-
-                {/* Asse longitudinale centrale */}
-                <line
-                  x1={10}
-                  y1={centerY}
-                  x2={svgWidth - 10}
-                  y2={centerY}
-                  stroke="#334155"
-                  strokeDasharray="4 4"
-                  strokeWidth="1"
-                />
-
-                {/* Sagoma esterna pianale */}
-                <rect
-                  x={startX}
-                  y={centerY - carWidthPx / 2}
-                  width={carLenPx}
-                  height={carWidthPx}
-                  rx={16}
-                  fill="rgba(16, 185, 129, 0.08)"
-                  stroke="#10b981"
-                  strokeWidth="1.5"
-                />
-
-                {/* Assale Anteriore */}
-                <line
-                  x1={frontAxleX}
-                  y1={centerY - (clampedFrontTrack * scalePxPerMm) / 2}
-                  x2={frontAxleX}
-                  y2={centerY + (clampedFrontTrack * scalePxPerMm) / 2}
-                  stroke="#38bdf8"
-                  strokeWidth="2"
-                />
-                {/* Ruote Anteriori */}
-                <rect
-                  x={frontAxleX - 14}
-                  y={centerY - (clampedFrontTrack * scalePxPerMm) / 2 - 6}
-                  width={28}
-                  height={10}
-                  rx={3}
-                  fill={metrics.resolvedDrivetrains.includes('FWD') || (metrics.hasAwdReady && previewAwdAsset) ? '#f59e0b' : '#475569'}
-                />
-                <rect
-                  x={frontAxleX - 14}
-                  y={centerY + (clampedFrontTrack * scalePxPerMm) / 2 - 4}
-                  width={28}
-                  height={10}
-                  rx={3}
-                  fill={metrics.resolvedDrivetrains.includes('FWD') || (metrics.hasAwdReady && previewAwdAsset) ? '#f59e0b' : '#475569'}
-                />
-
-                {/* Assale Posteriore */}
-                <line
-                  x1={rearAxleX}
-                  y1={centerY - (clampedRearTrack * scalePxPerMm) / 2}
-                  x2={rearAxleX}
-                  y2={centerY + (clampedRearTrack * scalePxPerMm) / 2}
-                  stroke="#38bdf8"
-                  strokeWidth="2"
-                />
-                {/* Ruote Posteriori */}
-                <rect
-                  x={rearAxleX - 14}
-                  y={centerY - (clampedRearTrack * scalePxPerMm) / 2 - 6}
-                  width={28}
-                  height={10}
-                  rx={3}
-                  fill={metrics.resolvedDrivetrains.includes('RWD') || (metrics.hasAwdReady && previewAwdAsset) ? '#f59e0b' : '#475569'}
-                />
-                <rect
-                  x={rearAxleX - 14}
-                  y={centerY + (clampedRearTrack * scalePxPerMm) / 2 - 4}
-                  width={28}
-                  height={10}
-                  rx={3}
-                  fill={metrics.resolvedDrivetrains.includes('RWD') || (metrics.hasAwdReady && previewAwdAsset) ? '#f59e0b' : '#475569'}
-                />
-
-                {/* Vano Motore */}
-                <rect
-                  x={bayCenterX - bayLenPx / 2}
-                  y={centerY - bayWidthPx / 2}
-                  width={bayLenPx}
-                  height={bayWidthPx}
-                  rx={6}
-                  fill="rgba(245, 158, 11, 0.22)"
-                  stroke="#f59e0b"
-                  strokeWidth="1.5"
-                />
-                <text
-                  x={bayCenterX}
-                  y={centerY + 3}
-                  textAnchor="middle"
-                  fill="#fcd34d"
-                  fontSize="9"
-                  fontFamily="monospace"
-                  fontWeight="bold"
-                >
-                  VANO MOTORE
-                </text>
-
-                {/* Quote Passo */}
-                <line
-                  x1={frontAxleX}
-                  y1={svgHeight - 14}
-                  x2={rearAxleX}
-                  y2={svgHeight - 14}
-                  stroke="#94a3b8"
-                  strokeWidth="1"
-                />
-                <text
-                  x={(frontAxleX + rearAxleX) / 2}
-                  y={svgHeight - 18}
-                  textAnchor="middle"
-                  fill="#cbd5e1"
-                  fontSize="9"
-                  fontFamily="monospace"
-                >
-                  Passo: {effectiveConfig.wheelbaseMm} mm
-                </text>
-              </svg>
-            </div>
-
-            <div className="flex items-center justify-between text-[10px] font-mono text-slate-400">
-              <span>Arancione = Ruote Motrici / Vano</span>
-              <span>
-                Sbalzi: Ant {metrics.frontOverhangMm}mm • Post {metrics.rearOverhangMm}mm
-              </span>
-            </div>
-          </div>
+          {/* Card Visualizzatore 3D CAD / Blueprint Tecnico Interattivo */}
+          <Chassis3DViewport
+            config={effectiveConfig}
+            metrics={metrics}
+            layoutRules={layoutRules}
+            previewAwdAsset={previewAwdAsset}
+            onTogglePreviewAwd={() => setPreviewAwdAsset((v) => !v)}
+          />
 
           {/* Card Telemetria Strutturale & Omologazione */}
           <div className="rounded-xl border border-slate-800 bg-slate-900/75 p-4 space-y-3 font-mono text-xs">

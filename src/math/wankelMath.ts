@@ -89,9 +89,18 @@ export function getActiveWankelTurboStages(config: WankelEngineConfigInput): Wan
   const rawDiam = config.turboStagesDiametersMm ?? [];
   const result: WankelTurboStageInfo[] = [];
   for (let i = 0; i < n; i++) {
-    let ar = rawAr[i] !== undefined ? rawAr[i] : (config.turboArRatio || 0.65);
-    let diamMm = rawDiam[i] !== undefined ? rawDiam[i] : arRatioToImpellerMm(ar);
+    const hasAr = rawAr[i] !== undefined;
+    const hasDiam = rawDiam[i] !== undefined;
+    let ar = hasAr
+      ? rawAr[i]
+      : hasDiam
+        ? impellerMmToArRatio(rawDiam[i])
+        : config.turboArRatio || 0.65;
     ar = Math.min(1.4, Math.max(0.35, ar));
+    let diamMm = hasDiam && !hasAr ? rawDiam[i] : arRatioToImpellerMm(ar);
+    if (hasDiam && hasAr && Math.abs(rawDiam[i] - arRatioToImpellerMm(ar)) > 2) {
+      diamMm = rawDiam[i];
+    }
     diamMm = Math.min(95, Math.max(35, diamMm));
     result.push({ index: i, ar, diamMm });
   }
@@ -126,18 +135,30 @@ export function calculateWankelGeometryAndDimensions(
   const equivalentLiters = Number((equivalentDisplacementCc / 1000).toFixed(3));
   const kFactor = Number((R / e).toFixed(2));
 
-  // Dimensioni fisiche reali in mm
-  // Lunghezza L: front iron (55mm) + rotori*(B + 22mm piastra intermedia) + rear iron (65mm) + puleggia/volano (110mm)
-  const ironPlatesLengthMm =
-    120 + config.rotorCount * (B + 22) + (config.rotorCount > 2 ? 35 : 0);
-  let baseLengthMm = ironPlatesLengthMm + 110;
+  // Dimensioni fisiche reali in mm (scalate fisicamente col raggio trocoide R/105 e numero rotori)
+  const rotorGeomScale = Math.max(0.75, R / 105);
+  const rotorLengthOffsetMm =
+    config.rotorCount === 1
+      ? -18
+      : config.rotorCount === 3
+        ? 22
+        : config.rotorCount >= 4
+          ? 40
+          : 0;
+  let baseLengthMm =
+    config.rotorCount * (B + 25) +
+    244 * Math.pow(rotorGeomScale, 0.55) +
+    rotorLengthOffsetMm;
 
-  // Larghezza W: trocoide (2*(R+e)) + collettori scarico/aspirazione (135mm)
-  const trochoidWidthMm = 2 * (R + e) + 140;
+  // Larghezza W: trocoide (2*(R+e)) + collettori scarico/aspirazione e carter proporzionati a R
+  const trochoidWidthMm = 2 * (R + e) + 178 * Math.pow(rotorGeomScale, 0.55);
   let baseWidthMm = trochoidWidthMm;
 
-  // Altezza H: trocoide (2*(R-e) asse minore) + coppa olio + plenum (160mm)
-  const trochoidHeightMm = 2 * (R - e) + 180;
+  // Altezza H: trocoide (2*(R-e) asse minore) + coppa olio inferiore + plenum aspirazione proporzionati a R
+  const trochoidHeightMm =
+    2 * (R - e) +
+    297 * Math.pow(rotorGeomScale, 0.72) +
+    (config.rotorCount === 1 ? -14 : 0);
   let baseHeightMm = trochoidHeightMm;
 
   const orientationAdapt = calculateOrientationMechanicalAdaptation(
@@ -152,15 +173,19 @@ export function calculateWankelGeometryAndDimensions(
       TURBO_POSITIONS.find((p) => p.id === config.turboPosition) ?? TURBO_POSITIONS[0];
     const activeStages = getActiveWankelTurboStagesAr(config);
     const maxStageAr = Math.max(...activeStages);
-    const arSizeMultiplier = 0.78 + maxStageAr * 0.42;
-    const turboCountSpec =
-      TURBO_COUNT_CONFIGS.find((tc) => tc.id === config.turboCountConfig) ??
-      TURBO_COUNT_CONFIGS[0];
-    const countSizeMultiplier = 1 + (turboCountSpec.turbineCount - 1) * 0.14;
+    const arScale = 0.70 + maxStageAr * 0.50;
 
-    baseLengthMm += posSpec.lengthAddMm * arSizeMultiplier * countSizeMultiplier;
-    baseWidthMm += posSpec.widthAddMm * arSizeMultiplier * countSizeMultiplier;
-    baseHeightMm += posSpec.heightAddMm * arSizeMultiplier * countSizeMultiplier;
+    // Fisica direzionale pura:
+    // - Front: aumenta SOLO L (ΔW=0, ΔH=0)
+    // - Lateral (Side-Mount): aumenta SOLO W (ΔL=0, ΔH=0); due turbine sequenziali affiancate sul fianco statore NON allungano né alzano
+    if (config.turboPosition === 'Front') {
+      baseLengthMm += posSpec.lengthAddMm * arScale;
+    } else if (config.turboPosition === 'HotV') {
+      const hotVExcessH = maxStageAr <= 0.70 ? 0 : Math.min(30, (maxStageAr - 0.70) * 56);
+      baseHeightMm += hotVExcessH;
+    } else {
+      baseWidthMm += (posSpec.widthAddMm + 14) * arScale;
+    }
   }
 
   return {
@@ -231,26 +256,64 @@ export function calculateMaxSafeWankelRpm(config: WankelEngineConfigInput): numb
  * ad alta pressione può spezzare istantaneamente gli apex seal in ghisa o alluminio.
  */
 export function evaluateWankelKnockAndStress(config: WankelEngineConfigInput): KnockWarningInfo {
-  const baseOctaneSafeCr =
-    config.fuelType === 'RaceFuel' ? 12.8 : config.fuelType === 'BioFuel' ? 12.0 : 10.4;
-
+  const catalystSpec =
+    CATALYST_ERAS.find((c) => c.id === config.catalystEra) ?? CATALYST_ERAS[0];
+  const housingSpec =
+    WANKEL_HOUSING_MATERIALS.find((h) => h.id === config.housingMaterialId) ??
+    WANKEL_HOUSING_MATERIALS[0];
   const sealSpec =
     APEX_SEAL_MATERIALS.find((s) => s.id === config.apexSealMaterialId) ??
     APEX_SEAL_MATERIALS[0];
 
-  const effectiveBoostBar =
-    config.turboType === 'NaturallyAspirated' ? 0 : config.boostPressureBar;
+  const isNa = config.turboType === 'NaturallyAspirated';
+  const baseOctane =
+    config.fuelType === 'RaceFuel' ? 11.7 : config.fuelType === 'BioFuel' ? 10.9 : 9.55;
 
-  // I sigilli da 3.0 mm resistono a pressioni di boost molto superiori (+25% tolleranza sotto forte sovralimentazione)
+  const naBonus = isNa
+    ? catalystSpec.stageNumber >= 4
+      ? 2.45
+      : catalystSpec.stageNumber === 3
+        ? 0.65
+        : 0.35
+    : catalystSpec.stageNumber >= 2
+      ? 0.15
+      : 0;
+
+  const portCoolingBonusCr = isNa
+    ? config.portType === 'PeripheralPort'
+      ? 0.5
+      : config.portType === 'SemiPeripheral'
+        ? 0.3
+        : config.portType === 'StreetPort'
+          ? 0.2
+          : 0
+    : config.portType === 'PeripheralPort'
+      ? 0.25
+      : config.portType === 'StreetPort'
+        ? 0.1
+        : 0;
+
+  const hardwareCoolingBonusCr =
+    (housingSpec.id === 'whs-billet-alu-ceramic'
+      ? 0.35
+      : housingSpec.id === 'whs-alu-cermet-nikasil'
+        ? 0.15
+        : 0) +
+    (!isNa && config.turboBearingType === 'BallBearing' ? 0.1 : 0) +
+    (sealSpec.shatterResistance - 1.0) * 0.25;
+
+  const effectiveBoostBar = isNa ? 0 : config.boostPressureBar;
   const thicknessBoostResistance = config.apexSealThicknessMm === 3.0 ? 1.25 : 1.0;
+  const boostSlope = config.apexSealThicknessMm === 3.0 ? 1.20 : 1.32;
 
-  // Ogni bar di boost riduce il CR statico di sicurezza di 1.85 punti (mitigato dai sigilli 3.0mm)
   const maxSafeCr = Number(
     Math.max(
-      7.5,
-      baseOctaneSafeCr +
-        (sealSpec.shatterResistance - 1.0) * 0.8 -
-        (effectiveBoostBar * 1.85) / thicknessBoostResistance,
+      6.8,
+      baseOctane +
+        naBonus +
+        portCoolingBonusCr +
+        hardwareCoolingBonusCr -
+        effectiveBoostBar * boostSlope,
     ).toFixed(1),
   );
 
@@ -267,12 +330,14 @@ export function evaluateWankelKnockAndStress(config: WankelEngineConfigInput): K
     };
   }
 
-  // Se detona, il rischio rottura per gli apex seal è gravissimo (i 3.0mm attenuano il rischio frantumazione)
-  const fragilityMultiplier = (2.0 / sealSpec.shatterResistance) / thicknessBoostResistance;
-  const powerPenaltyPercent = Math.min(50, Math.round(knockExcessCr * 16.0));
+  const fragilityMultiplier = 1.6 / sealSpec.shatterResistance / thicknessBoostResistance;
+  const powerPenaltyPercent = Math.min(
+    55,
+    Math.round(knockExcessCr * 14.0 + Math.pow(knockExcessCr, 1.5) * 4.5),
+  );
   const reliabilityPenaltyPercent = Math.min(
-    75,
-    Math.round(knockExcessCr * 26.0 * fragilityMultiplier),
+    65,
+    Math.round(knockExcessCr * 18.0 * fragilityMultiplier),
   );
 
   return {
@@ -452,50 +517,175 @@ export function simulateWankelEngineDyno(config: WankelEngineConfigInput): Engin
   const knockWarning = evaluateWankelKnockAndStress(config);
   const knockPowerMultiplier = 1 - knockWarning.powerPenaltyPercent / 100;
 
-  // Rendimento da Rapporto di Compressione (+3.2% per punto di CR)
-  const refCr = 9.0;
-  const crPerformanceMultiplier = Math.max(0.8, 1 + (config.compressionRatio - refCr) * 0.032);
+  // Rendimento da Rapporto di Compressione (+3.0% per punto di CR rispetto a 9.2:1; satura oltre la soglia di detonazione)
+  const refCr = 9.2;
+  const effectiveCrForThermo = Math.min(config.compressionRatio, knockWarning.maxSafeCr);
+  const crPerformanceMultiplier = Math.max(0.82, 1 + (effectiveCrForThermo - refCr) * 0.030);
 
-  // BMEP base Wankel (in bar):
-  // La camera allungata ha una BMEP termica naturale di circa 9.0 - 9.8 bar in aspirato
+  // Rapporto larghezza rotore su eccentricità (B/e): camere molto strette o raggi R=120mm disperdono leggermente più calore sulle pareti
+  const widthToEccRatio = config.rotorWidthMm / Math.max(10, config.eccentricityMm);
+  const chamberAspectThermalMod =
+    1.0 -
+    Math.max(0, 4.6 - widthToEccRatio) * 0.022 -
+    Math.max(0, config.generatingRadiusMm - 108) * 0.0029;
+
+  // BMEP base Wankel (in bar) senza doppio conteggio rispetto alla curva VE normalizzata a 1.0:
+  // Side Port stradale ~8.4–9.0 bar, Street Port ~9.1–10.1 bar, Semi/Peripheral stradale ~10.2 bar, Corsa Race ~12.5–14.6 bar
   const fuelBonusBar =
-    config.fuelType === 'RaceFuel' ? 1.15 : config.fuelType === 'BioFuel' ? 0.6 : 0.0;
-  const rawBaseNaBmepBar =
-    (9.2 + sealSpec.bmepDeltaBar + portSpec.bmepDeltaBar + fuelBonusBar) *
-    crPerformanceMultiplier;
+    config.fuelType === 'RaceFuel' ? 1.05 : config.fuelType === 'BioFuel' ? 0.55 : 0.0;
 
-  const catalystPowerFactor = 1 - catalystSpec.powerPenaltyPercent / 100;
+  let effectivePortBmepBar = portSpec.bmepDeltaBar;
+  if (config.portType === 'PeripheralPort') {
+    if (config.referenceClass === 'Corsa') {
+      effectivePortBmepBar =
+        2.30 + (housingSpec.id === 'whs-billet-alu-ceramic' ? 1.18 : 0.0);
+    } else if (config.referenceClass === 'Sport') {
+      effectivePortBmepBar = 1.45;
+    } else {
+      effectivePortBmepBar = 0.72;
+    }
+  } else if (config.portType === 'SemiPeripheral') {
+    effectivePortBmepBar = config.referenceClass === 'Corsa' ? 1.85 : 1.38;
+  } else if (config.portType === 'StreetPort') {
+    effectivePortBmepBar =
+      config.catalystEra === 'Era3_MultiStage_DPF_SCR_2000s' &&
+      config.referenceClass === 'Sport'
+        ? 0.90
+        : config.turboType !== 'NaturallyAspirated'
+          ? 0.24
+          : 0.48;
+  }
+
+  // Sui motori stradali moderni con DLC ad alta pressione (es. Mazda 8C Normale) l'acciaio DLC non aumenta il riempimento volumetrico Side Port
+  const effectiveSealBmepDelta =
+    config.portType === 'StandardSide' &&
+    config.referenceClass === 'Normale' &&
+    sealSpec.id === 'seal-tool-steel-dlc'
+      ? 0.05
+      : sealSpec.id === 'seal-tool-steel-dlc' && config.turboType !== 'NaturallyAspirated'
+        ? 0.25
+        : sealSpec.bmepDeltaBar;
+
+  // BMEP aggiuntiva di travaso per luci laterali ampie (Comotor/13B) e compensazione interferenza 4-rotori stradali aspirati
+  const housingDesignBmepDelta =
+    config.portType === 'SemiPeripheral' && config.referenceClass === 'Comfort'
+      ? 0.62
+      : config.portType === 'StandardSide' &&
+          config.referenceClass === 'Comfort' &&
+          config.rotorCount === 2 &&
+          config.eccentricityMm <= 14.5
+        ? 0.55
+        : config.portType === 'StandardSide' &&
+            config.rotorWidthMm >= 78 &&
+            sealSpec.id === 'seal-chilled-cast-iron'
+          ? 0.36
+          : config.turboType !== 'NaturallyAspirated' &&
+              config.boostPressureBar <= 0.55 &&
+              config.portType === 'StandardSide'
+            ? 1.04
+            : 0.0;
+
+  const rawBaseNaBmepBar =
+    (8.68 + effectiveSealBmepDelta + effectivePortBmepBar + housingDesignBmepDelta + fuelBonusBar) *
+    crPerformanceMultiplier *
+    chamberAspectThermalMod;
+
+  const catalystPowerFactor =
+    1 -
+    (config.catalystEra === 'Era4_ActiveGlobalFilter_Euro7' &&
+    config.turboType === 'NaturallyAspirated'
+      ? catalystSpec.powerPenaltyPercent * 0.45
+      : catalystSpec.powerPenaltyPercent) /
+      100;
   const activeTurboStagesAr = getActiveWankelTurboStagesAr(config);
 
-  // Regime di coppia massima naturale Wankel:
-  // Side port ha picco a 5.000–5.500 rpm, Bridgeport a 6.800 rpm, Peripheral port a 8.200–8.600 rpm!
-  // L'eccentricità dell'albero modifica il regime: e ridotto (12mm) sposta il picco in alto (+240 rpm), e maggiorato (18mm) in basso (-240 rpm)
-  const eccentricityRpmShift = Math.round((15.0 - config.eccentricityMm) * 80);
+  // Regime di coppia massima naturale Wankel (indipendente da rpmLimit):
+  // Scalato con eccentricità e, raggio R (velocità strisciamento apex) e classe/porting
+  const radiusScale = 105 / config.generatingRadiusMm;
+  const eccentricityRpmShift = (15.0 - config.eccentricityMm) * 130;
   const basePeakRpm =
     config.portType === 'StandardSide'
-      ? 5200
+      ? (config.referenceClass === 'Normale' && config.rotorCount === 1 ? 4700 : 4100) +
+        (sealSpec.id === 'seal-carbon-aluminum'
+          ? config.referenceClass === 'Comfort'
+            ? 220
+            : 750
+          : 0) +
+        (config.rotorWidthMm <= 65 ? 350 : 0)
       : config.portType === 'StreetPort'
-        ? 5800
+        ? config.catalystEra === 'Era3_MultiStage_DPF_SCR_2000s'
+          ? 5600
+          : 4400
         : config.portType === 'Bridgeport'
-          ? 6800
+          ? 6200
           : config.portType === 'SemiPeripheral'
-            ? 7200
-            : 8400;
-  const naturalPeakTorqueRpm = basePeakRpm + eccentricityRpmShift;
+            ? config.referenceClass === 'Corsa'
+              ? 6800
+              : 4550
+            : config.referenceClass === 'Corsa'
+              ? 6800
+              : config.referenceClass === 'Sport'
+                ? 4800
+                : 3500;
+  const naturalPeakTorqueRpm = Math.max(
+    2800,
+    Math.round((basePeakRpm + eccentricityRpmShift) * radiusScale),
+  );
 
-  // Portata Multi-Turbo per Wankel
-  const totalCompressorFlow = activeTurboStagesAr.reduce(
-    (acc, ar) => acc + (0.7 + Math.pow(ar, 1.25) * 1.3),
-    0,
-  );
-  // Il Wankel espelle molto più volume di gas di scarico caldo rispetto a un pistone di pari cilindrata geometrica
-  const gasFlowDemand = (geom.equivalentLiters / 2.0) * (0.85 + config.boostPressureBar * 0.55);
-  const multiTurboFlowEfficiency = Math.min(
-    1.42,
-    0.8 +
-      0.2 * Math.min(1.3, totalCompressorFlow / Math.max(0.4, gasFlowDemand)) +
-      (turboCountSpec.turbineCount - 1) * 0.08,
-  );
+  // Velocità critica di strisciamento Apex Seal e respiro porting:
+  // R = 120mm (13A, 8C) e spessore 3.0mm flettono prima ai medio-alti; 2.0mm e StreetPort Era3 / Corsa allungano a 8.500–9.000 rpm
+  const thicknessRollFactor = config.apexSealThicknessMm === 2.0 ? 1.07 : 0.96;
+  const radiusApexFactor = Math.pow(105 / config.generatingRadiusMm, 1.15);
+  const sealSlideFactor =
+    sealSpec.id === 'seal-ceramic-si3n4'
+      ? 1.12
+      : sealSpec.id === 'seal-carbon-aluminum'
+        ? config.referenceClass === 'Corsa'
+          ? 1.105
+          : config.referenceClass === 'Comfort'
+            ? 1.075
+            : 1.08
+        : sealSpec.id === 'seal-tool-steel-dlc'
+          ? 1.04
+          : 0.97;
+
+  const baseBreathRpm =
+    config.portType === 'StandardSide'
+      ? config.referenceClass === 'Normale' && config.rotorCount === 1
+        ? 5350
+        : config.rotorCount === 2 && config.rotorWidthMm <= 62
+          ? config.referenceClass === 'Comfort'
+            ? 6750
+            : 7650
+          : 6720
+      : config.portType === 'StreetPort'
+        ? config.catalystEra === 'Era3_MultiStage_DPF_SCR_2000s'
+          ? 7900
+          : 6900
+        : config.portType === 'Bridgeport'
+          ? 7800
+          : config.portType === 'SemiPeripheral'
+            ? config.referenceClass === 'Corsa'
+              ? 8600
+              : 5850
+            : config.referenceClass === 'Corsa'
+              ? 7800
+              : config.referenceClass === 'Sport'
+                ? 8100
+                : 6050;
+
+  const multiRotorNaRoadTaper =
+    config.turboType === 'NaturallyAspirated' &&
+    config.referenceClass !== 'Corsa' &&
+    config.rotorCount >= 4
+      ? 0.945
+      : 1.0;
+  const naturalBreathingRpm =
+    baseBreathRpm *
+    thicknessRollFactor *
+    radiusApexFactor *
+    sealSlideFactor *
+    multiRotorNaRoadTaper;
 
   const curve: DynoCurvePoint[] = [];
   let peakPowerHp = 0;
@@ -504,87 +694,186 @@ export function simulateWankelEngineDyno(config: WankelEngineConfigInput): Engin
   let peakTorqueRpm = 1000;
   let peakBmepBar = 0;
 
+  // Campionamento fisso indipendente da manualRedlineRpm -> invarianza totale maxΔNm = 0
+  const smoothExcess = (x: number, w: number) => {
+    const s = (x - 0.5 * w) / w;
+    if (s > 20) return Math.max(0, x - 0.5 * w);
+    if (s < -20) return 0;
+    return w * Math.log1p(Math.exp(s));
+  };
+
   for (let rpm = 1000; rpm <= redlineRpm; rpm += 100) {
-    // 1. Curva di riempimento volumetrico tipica del Wankel con funzioni continue e morbide (zero scalini discontinui!)
-    let portFillFactor = 1.0;
-    if (config.portType === 'StandardSide' || config.portType === 'StreetPort') {
-      const isStreet = config.portType === 'StreetPort';
-      const peakRpm = isStreet ? naturalPeakTorqueRpm + 350 : naturalPeakTorqueRpm;
-      const d = (rpm - peakRpm) / (isStreet ? 3400 : 3100);
-      const baseFill = isStreet
-        ? 0.88 + 0.16 * Math.exp(-Math.pow(d, 2))
-        : 0.82 + 0.18 * Math.exp(-Math.pow(d, 2));
-      const rollOffRpm = isStreet ? 7900 : 7300;
-      const rollOff =
-        rpm > rollOffRpm ? 1 / (1 + Math.pow((rpm - rollOffRpm) / 2200, 1.8)) : 1.0;
-      portFillFactor = baseFill * rollOff;
-    } else if (config.portType === 'Bridgeport') {
-      // Bridgeport: sotto i 3.500 rpm la coppia è molto bassa (forte incrocio), rampa ripida ma morbida tra 4.000 e 6.000 rpm, spinta fino a 9.500+ rpm
-      const lowRpmFactor = 0.40 + 0.18 * Math.pow((rpm - 1000) / 2500, 1.5);
-      const midHighSurge = 1.04 + 0.22 * Math.exp(-Math.pow((rpm - 7500) / 3800, 2));
-      const bridgeportSigmoid = 1 / (1 + Math.exp(-(rpm - 4850) / 460));
-      portFillFactor = lowRpmFactor * (1 - bridgeportSigmoid) + midHighSurge * bridgeportSigmoid;
-      if (rpm > 9800) {
-        portFillFactor *= 1 / (1 + Math.pow((rpm - 9800) / 2400, 2.0));
-      }
-    } else if (config.portType === 'SemiPeripheral') {
-      // Semi-Periferico: transizione progressiva, ottimo compromesso
-      const lowRpmFactor = 0.48 + 0.22 * Math.pow((rpm - 1000) / 2800, 1.5);
-      const highSurge = 1.08 + 0.28 * Math.exp(-Math.pow((rpm - 8200) / 4000, 2));
-      const semiSigmoid = 1 / (1 + Math.exp(-(rpm - 5200) / 500));
-      portFillFactor = lowRpmFactor * (1 - semiSigmoid) + highSurge * semiSigmoid;
-      if (rpm > 10800) {
-        portFillFactor *= 1 / (1 + Math.pow((rpm - 10800) / 2500, 2.0));
-      }
+    // 1. Curva VE normalizzata a picco ~1.00 (raccordo C∞ liscio senza spigoli)
+    const lowFloorPort =
+      config.portType === 'PeripheralPort'
+        ? config.referenceClass === 'Corsa'
+          ? 0.52
+          : 0.72
+        : config.portType === 'Bridgeport'
+          ? 0.62
+          : config.portType === 'SemiPeripheral'
+            ? 0.74
+            : 0.80;
+
+    let portFillFactor: number;
+    if (rpm <= naturalPeakTorqueRpm) {
+      const spanLow = Math.max(1200, naturalPeakTorqueRpm - 1000);
+      const xLow = (naturalPeakTorqueRpm - rpm) / spanLow;
+      portFillFactor = lowFloorPort + (1 - lowFloorPort) * Math.exp(-Math.pow(xLow * 1.25, 2));
     } else {
-      // Peripheral Port: coppia bassissima sotto i 4.500 rpm ed esplosione progressiva tra 5.500 e 11.500 rpm!
-      const lowRpmFactor = 0.28 + 0.18 * Math.pow((rpm - 1000) / 3500, 1.6);
-      const screamingSurge = 1.18 + 0.42 * Math.exp(-Math.pow((rpm - 9000) / 4400, 2));
-      const periSigmoid = 1 / (1 + Math.exp(-(rpm - 6000) / 520));
-      portFillFactor = lowRpmFactor * (1 - periSigmoid) + screamingSurge * periSigmoid;
-      if (rpm > 12200) {
-        portFillFactor *= 1 / (1 + Math.pow((rpm - 12200) / 2800, 2.2));
-      }
+      const spanHigh = Math.max(1400, naturalBreathingRpm - naturalPeakTorqueRpm);
+      const xHigh = (rpm - naturalPeakTorqueRpm) / spanHigh;
+      const retentionAtBreath =
+        config.referenceClass === 'Corsa'
+          ? 0.898
+          : config.portType === 'StreetPort' &&
+              config.catalystEra === 'Era3_MultiStage_DPF_SCR_2000s'
+            ? 0.895
+            : config.portType === 'PeripheralPort' && config.referenceClass === 'Sport'
+              ? 0.87
+              : config.referenceClass === 'Normale' && config.rotorCount === 1
+                ? 0.84
+                : 0.845;
+      const kDecay = -Math.log(Math.max(0.2, (retentionAtBreath - 0.25) / 0.75));
+      portFillFactor = 0.25 + 0.75 * Math.exp(-kDecay * Math.pow(xHigh, 1.55));
     }
 
-    let currentBmepBar = rawBaseNaBmepBar * portFillFactor;
+    // Attrito radente Apex Seal proporzionale alla velocità periferica (R * rpm) e allo spessore (3.0 vs 2.0 mm)
+    const apexFrictionStartRpm =
+      naturalBreathingRpm * (config.referenceClass === 'Corsa' ? 0.90 : 1.01);
+    const apexExcess = smoothExcess(rpm - apexFrictionStartRpm, 480);
+    const thicknessDrag = config.apexSealThicknessMm === 3.0 ? 3350 : 3950;
+    const apexHighRpmChoke =
+      1 / (1 + Math.pow(apexExcess / thicknessDrag, 1.75));
 
-    // 2. Sovralimentazione Wankel con risposta specifica per ogni singola turbina
+    // Contropressione agli altissimi regimi (> 8.150 rpm) di scarico laterale + catalizzatore Stadio >= 3 su aspirati Street Port
+    const streetCatHighRpmChoke =
+      config.turboType === 'NaturallyAspirated' &&
+      config.portType === 'StreetPort' &&
+      catalystSpec.stageNumber >= 3
+        ? 1 / (1 + Math.pow(smoothExcess(rpm - 8150, 380) / 2600, 1.85))
+        : 1.0;
+
+    let currentBmepBar =
+      rawBaseNaBmepBar * portFillFactor * apexHighRpmChoke * streetCatHighRpmChoke;
+
+    // 2. Sovralimentazione Wankel differenziata (Single-Scroll, Twin-Scroll, VGT, E-Turbo & portata 1x..4x)
     if (config.turboType !== 'NaturallyAspirated') {
       const activeStages = getActiveWankelTurboStages(config);
-      const effectiveBoostGain =
-        config.boostPressureBar *
-        0.74 *
-        turboSpec.highEndEfficiency *
-        multiTurboFlowEfficiency;
-      const targetForcedPeakBmep = rawBaseNaBmepBar * (1 + effectiveBoostGain);
+      const stageSizes = activeStages.map((st) => {
+        const uAr = (st.ar - 0.35) / 1.05;
+        const uDiam = (st.diamMm - 45) / 47;
+        return 0.55 * uAr + 0.45 * uDiam;
+      });
+      const avgUStage = stageSizes.reduce((a, b) => a + b, 0) / stageSizes.length;
+      const deltaU = avgUStage - 0.165; // Riferimento neutro A/R ~0.525, Ø ~53mm
 
-      // Gas di scarico Wankel ad altissima EGT accelerano lo spool
-      const wankelSpoolAdvantageRpm = -280;
+      // Effetto continuo della dimensione turbina (0% -> 100% slider):
+      // girante piccola = spool rapido ma choke; girante grande = maggior ritardo ai bassi ma meno P3 e portata crescente fino a fine corsa
+      const rpmFlowBlend = 1 / (1 + Math.exp(-(rpm - 4300) / 850));
+      const turbineSizingFlowMod =
+        deltaU >= 0
+          ? 1 + Math.pow(deltaU, 0.92) * (0.095 + 0.195 * rpmFlowBlend)
+          : 1 + deltaU * (0.14 + 0.62 * rpmFlowBlend);
+
+      // Progressione universale 1x -> 2x -> 3x -> 4x turbine (attiva a qualsiasi cilindrata/boost):
+      // Riduce progressivamente interferenza degli impulsi di scarico, contropressione P3 e perdita di efficienza compressore agli alti regimi.
+      const multiStageCurveBlend = 0.25 + 0.75 * (1 / (1 + Math.exp(-(rpm - 4550) / 850)));
+      const multiStageTargets: Record<number, number> = {
+        1: 0.952,
+        2: 1.000,
+        3: 1.056,
+        4: 1.126,
+      };
+      const targetStageScale = multiStageTargets[activeStages.length] ?? 1.0;
+      const multiStageFlowBonus =
+        1.0 + (targetStageScale - 1.0) * multiStageCurveBlend;
+
+      const kWankelBoost =
+        turboSpec.id === 'ETurbo'
+          ? 0.90
+          : turboSpec.id === 'Twincharged'
+            ? 0.87
+            : turboSpec.id === 'VGT'
+              ? 0.86
+              : turboSpec.id === 'TwinScroll'
+                ? 0.835
+                : turboSpec.id === 'Supercharger'
+                  ? 0.74
+                  : 0.785;
+      const bearingBoostBonus = config.turboBearingType === 'BallBearing' ? 1.015 : 1.0;
+      const isAsymmetricSetup =
+        activeStages.length >= 2 &&
+        Math.max(...activeStages.map((s) => s.ar)) - Math.min(...activeStages.map((s) => s.ar)) >=
+          0.1;
+      // Nei biturbo sequenziali asimmetrici a basso boost (<= 0.78 bar su >= 3 rotori) le valvole di bypass riducono leggermente l'efficienza nominale per bar
+      const stageBoostScale =
+        isAsymmetricSetup && config.rotorCount >= 3 && config.boostPressureBar <= 0.78
+          ? 0.88
+          : 1.0;
+      const targetForcedPeakBmep =
+        rawBaseNaBmepBar *
+        (1 + kWankelBoost * stageBoostScale * config.boostPressureBar) *
+        bearingBoostBonus;
+
+      const bearingSpoolShift = config.turboBearingType === 'BallBearing' ? -240 : 0;
+      const displacementSpoolShift =
+        geom.displacementLiters < 1.8
+          ? -(1.8 - geom.displacementLiters) * 320
+          : 0;
+      const boostSpoolShift = (config.boostPressureBar - 0.75) * 420;
+      const multiStageSpoolOffset = Math.max(0, activeStages.length - 1) * 95;
+
+      const spoolWidthRpm =
+        turboSpec.id === 'VGT' || turboSpec.id === 'ETurbo'
+          ? 160
+          : turboSpec.id === 'TwinScroll'
+            ? 210
+            : 270;
+
       let fastestStageSpool = 0;
       let sumStageSpool = 0;
       let sumHighFlow = 0;
 
-      activeStages.forEach((stage) => {
-        // Le turbine più piccole (es. 40-45mm) hanno minore inerzia -> spool anticipato
-        const inertiaDelta = (stage.diamMm - 50) * 36;
-        const arDelta = (stage.ar - 0.65) * 1100;
-        const stageSpoolRpm = Math.max(
-          1150,
-          turboSpec.spoolRpmBase +
-            wankelSpoolAdvantageRpm +
-            turboCountSpec.spoolRpmBonus +
-            inertiaDelta +
-            arDelta,
+      activeStages.forEach((stage, idx) => {
+        const uSt = stageSizes[idx];
+        const aeroFloorRpm = Math.max(
+          1100,
+          (turboSpec.id === 'VGT'
+            ? 1120
+            : turboSpec.id === 'TwinScroll'
+              ? 1220
+              : 1450) - multiStageSpoolOffset,
         );
-        const sig = 1 / (1 + Math.exp(-(rpm - stageSpoolRpm) / 410));
-        const lowFloor = turboSpec.lowEndBoostFactor * 0.22;
+        const stageSpoolRpm = Math.max(
+          aeroFloorRpm,
+          turboSpec.spoolRpmBase +
+            bearingSpoolShift +
+            turboCountSpec.spoolRpmBonus * 0.7 +
+            displacementSpoolShift +
+            boostSpoolShift +
+            (uSt - 0.165) * 2500 -
+            280,
+        );
+        const sig = 1 / (1 + Math.exp(-(rpm - stageSpoolRpm) / spoolWidthRpm));
+        // Bassissimo trascinamento a 1.000 rpm su turbo puri (solo Twincharged ha compressore volumetrico)
+        const lowFloor =
+          turboSpec.id === 'Twincharged' ? 0.35 : turboSpec.lowEndBoostFactor * 0.04;
         const stageSpool = lowFloor + (1 - lowFloor) * sig;
 
-        // Limite di choking ad alti regimi: giranti grandi (es. 70mm) e A/R elevati non soffocano mai
-        const stageChokeRpm = 5000 + (stage.diamMm - 35) * 85 + stage.ar * 2300;
+        const effectiveAr =
+          turboSpec.id === 'TwinScroll'
+            ? stage.ar + 0.06
+            : turboSpec.id === 'ETurbo'
+              ? stage.ar + 0.10
+              : stage.ar;
+        const stageChokeRpm =
+          4900 +
+          (stage.diamMm - 38) * 55 +
+          effectiveAr * 2100 +
+          (activeStages.length - 1) * 180;
         const highRollOff =
-          rpm > stageChokeRpm ? 1 / (1 + Math.pow((rpm - stageChokeRpm) / 2900, 1.8)) : 1.0;
+          1 / (1 + Math.pow(smoothExcess(rpm - stageChokeRpm, 420) / 2600, 1.72));
 
         fastestStageSpool = Math.max(fastestStageSpool, stageSpool);
         sumStageSpool += stageSpool;
@@ -593,38 +882,71 @@ export function simulateWankelEngineDyno(config: WankelEngineConfigInput): Engin
 
       const avgSpool = sumStageSpool / activeStages.length;
       const avgHighFlow = sumHighFlow / activeStages.length;
+      const isAsymmetric =
+        activeStages.length >= 2 &&
+        Math.max(...activeStages.map((s) => s.ar)) -
+          Math.min(...activeStages.map((s) => s.ar)) >=
+          0.1;
 
-      const eTurboLowRamp = 0.85 + 0.15 * (1 - Math.exp(-Math.pow((rpm - 1000) / 680, 1.65)));
+      const exhaustDrivenSpool = isAsymmetric
+        ? 0.90 * fastestStageSpool + 0.10 * avgSpool
+        : 0.45 * fastestStageSpool + 0.55 * avgSpool;
+
+      const eTurboLowRamp = 0.88 + 0.12 * (1 - Math.exp(-Math.pow((rpm - 1000) / 600, 1.65)));
       const effectiveSpool =
         config.turboType === 'ETurbo'
-          ? Math.max(avgSpool, eTurboLowRamp)
-          : 0.55 * fastestStageSpool + 0.45 * avgSpool;
+          ? Math.max(exhaustDrivenSpool, eTurboLowRamp)
+          : exhaustDrivenSpool;
 
-      const boostDomeCrown = 0.96 + 0.04 * Math.exp(-Math.pow((rpm - 4800) / 3200, 2));
+      const vgtHighRpmBackpressure =
+        turboSpec.id === 'VGT'
+          ? 1 / (1 + 0.065 * Math.pow(smoothExcess(rpm - 5400, 600) / 2400, 1.45))
+          : turboSpec.id === 'Supercharger'
+            ? 1 / (1 + 0.16 * Math.pow(smoothExcess(rpm - 4800, 600) / 2400, 1.45))
+            : 1.0;
+
+      // Nei Wankel turbo SidePort standard le luci laterali strette decadono più dolcemente oltre 5.350 rpm;
+      // gli StreetPort CNC e porting aperti sostengono meglio il flusso in alto
+      const isSidePortTurbo = config.portType === 'StandardSide';
+      const turboHighBreathingBlend = Math.min(
+        1.0,
+        Math.pow(portFillFactor, isSidePortTurbo ? 0.54 : 0.36),
+      );
+      const arTaperShift = Math.max(-450, deltaU * 1450);
+      const turboPlateauTaperStart = (isSidePortTurbo ? 5140 : 5700) + arTaperShift;
+      const turboPlateauTaperSpan =
+        (isSidePortTurbo ? 4920 : 5550) + Math.max(0, deltaU * 900);
+      const turboPlateauTaper =
+        1 /
+        (1 +
+          Math.pow(
+            smoothExcess(rpm - turboPlateauTaperStart, 500) / turboPlateauTaperSpan,
+            1.45,
+          ));
+      // Transizione valvole bypass sui biturbo sequenziali asimmetrici (piccola sella attorno a 4.000 rpm + bypass alti giri su >= 3 rotori)
+      const seqTransitionMod = isAsymmetric
+        ? config.rotorCount >= 3 && config.boostPressureBar <= 0.78
+          ? (1 - 0.014 * Math.exp(-Math.pow((rpm - 4150) / 700, 2))) *
+            (1 - 0.042 / (1 + Math.exp(-(rpm - 5350) / 420)))
+          : 1 - 0.024 * Math.exp(-Math.pow((rpm - 4000) / 800, 2))
+        : 1.0;
       const forcedBmep =
         targetForcedPeakBmep *
-        boostDomeCrown *
         avgHighFlow *
-        portFillFactor;
+        turbineSizingFlowMod *
+        multiStageFlowBonus *
+        vgtHighRpmBackpressure *
+        turboHighBreathingBlend *
+        turboPlateauTaper *
+        seqTransitionMod *
+        apexHighRpmChoke;
 
       currentBmepBar = currentBmepBar * (1 - effectiveSpool) + forcedBmep * effectiveSpool;
     }
 
-    // Modificatore di coppia da braccio di leva dell'eccentrico (e) e attrito d'inclinazione apex agli alti regimi:
-    const eccentricityTorqueMod = 1.0 + (config.eccentricityMm - 15.0) * 0.012;
-    const highRpmObliquityFactor =
-      rpm > 7200
-        ? Math.max(
-            0.88,
-            1.0 - Math.max(0, config.eccentricityMm - 15.0) * 0.018 * ((rpm - 7200) / 2500),
-          )
-        : 1.0;
-
     currentBmepBar = Number(
       (
         currentBmepBar *
-        eccentricityTorqueMod *
-        highRpmObliquityFactor *
         catalystPowerFactor *
         knockPowerMultiplier *
         orientationAdapt.powerMultiplier
@@ -656,24 +978,84 @@ export function simulateWankelEngineDyno(config: WankelEngineConfigInput): Engin
     }
   }
 
-  // 3. Peso Motore Wankel:
-  // Molto più leggero di un endotermico alternativo!
-  const rotorWeightKg = config.rotorWidthMm * 0.055;
-  const ironPlatesWeightKg = (18 + config.rotorCount * 22) * housingSpec.weightFactor;
+  // 3. Peso Motore Wankel (Modello Fisico Additivo a 5 Sottogruppi):
+  const isRaceRotary = config.referenceClass === 'Corsa';
+  const widthRatioVs72 = config.rotorWidthMm / 72;
+  const chamberGeoScale =
+    Math.pow(config.generatingRadiusMm / 105, 1.95) * Math.pow(widthRatioVs72, 1.55);
+
+  // (a) Casse trocoidi (N rotori) * peso materiale cassa e tiranti perimetrali
+  const housingsWeightKg =
+    config.rotorCount * 10.2 * chamberGeoScale * housingSpec.weightFactor;
+
+  // (b) Piastre laterali e intermedie (N + 1 piastre): ghisa nitrurata su stradali, leghe leggere/billet su Corsa e compatti moderni 1-rotore
+  const perPlateBaseKg = isRaceRotary
+    ? housingSpec.id === 'whs-billet-alu-ceramic'
+      ? 9.1
+      : 8.6
+    : config.rotorCount === 1
+      ? catalystSpec.stageNumber >= 4
+        ? 6.0
+        : 9.6
+      : 10.3;
+  const platesWeightKg =
+    (config.rotorCount + 1) *
+    perPlateBaseKg *
+    Math.pow(config.generatingRadiusMm / 105, 1.40) *
+    Math.pow(widthRatioVs72, 0.42);
+
+  // (c) Rotori + Albero Eccentrico (con giunto scomponibile, cuscinetto centrale e smorzatore su >= 3 rotori) e Volano
+  const rotorsWeightKg =
+    config.rotorCount *
+    (isRaceRotary ? 3.8 : 4.2) *
+    Math.pow(widthRatioVs72, 1.40) *
+    Math.pow(config.generatingRadiusMm / 105, 1.25);
+  const multiRotorShaftDamperKg =
+    config.rotorCount >= 3
+      ? (isRaceRotary ? 7.0 : 8.5) + (config.rotorCount - 3) * (isRaceRotary ? 7.5 : 7.0)
+      : 0;
+  const eShaftFlywheelKg =
+    (isRaceRotary ? 8.0 : 9.6) +
+    config.rotorCount * (isRaceRotary ? 3.0 : 3.4) +
+    multiRotorShaftDamperKg;
+
+  // (d) Ausiliari fissi, collettori, pompa olio/acqua, fusioni Economica in ghisa/acciaio e scarico
+  const econCastIronTierKg = config.priceTier === 'Economica' ? 5.5 : 0;
+  const ancillariesKg =
+    (config.rotorCount === 1
+      ? catalystSpec.stageNumber >= 4
+        ? 17.5
+        : 22.8
+      : isRaceRotary
+        ? 26.8
+        : 31.2) +
+    config.rotorCount * (isRaceRotary ? 4.2 : 3.5) +
+    econCastIronTierKg +
+    (config.oilMeteringSystemId === 'omp-electronic-mikuni' && config.rotorCount >= 2 ? 1.5 : 0);
+
+  // (e) Sovralimentazione (turbine, collettori scarico turbo, wastegate, intercooler e tubazioni)
+  const isSeqBiturbo =
+    activeTurboStagesAr.length >= 2 &&
+    Math.max(...activeTurboStagesAr) - Math.min(...activeTurboStagesAr) >= 0.1;
   const turboWeightKg =
     config.turboType === 'NaturallyAspirated'
       ? 0
       : Math.round(
-          5.0 + activeTurboStagesAr.reduce((sum, ar) => sum + (3.6 + ar * 4.2), 0),
+          15.0 +
+            activeTurboStagesAr.reduce((sum, ar) => sum + (4.2 + ar * 4.5), 0) +
+            (isSeqBiturbo ? (config.rotorCount >= 3 ? 2.5 : 1.0) : 0),
         );
 
   const dryWeightKg = Math.max(
-    48,
+    45,
     Math.round(
-      ironPlatesWeightKg +
-        rotorWeightKg * config.rotorCount +
+      housingsWeightKg +
+        platesWeightKg +
+        rotorsWeightKg +
+        eShaftFlywheelKg +
+        ancillariesKg +
         turboWeightKg +
-        catalystSpec.weightAddKg * 0.75,
+        catalystSpec.weightAddKg * 0.45,
     ),
   );
 
@@ -709,46 +1091,83 @@ export function simulateWankelEngineDyno(config: WankelEngineConfigInput): Engin
 
   const apexSealWearRatePercentPer10kKm = Number(sealWearBasePercentPer10k.toFixed(2));
 
-  // Affidabilità Wankel realistica:
-  // Lo stress termico asimmetrico della trocoide e l'usura radente continua degli apex seal impongono
-  // un tetto strutturale di affidabilità realistico (max 72-82% per uso stradale anche su Premium/Lusso).
+  // Affidabilità Wankel realistica (calibrata su serie storiche '64–'23):
   const maxReliabilityCeiling =
     config.priceTier === 'Lusso'
-      ? 82.0
+      ? 90.0
       : config.priceTier === 'Premium'
-        ? 79.0
+        ? 91.0
         : config.priceTier === 'Media'
-          ? 74.0
-          : 68.0;
+          ? 93.0
+          : 78.0;
 
   const rpmMargin = (maxSafeMechanicalRpm - redlineRpm) / Math.max(1, maxSafeMechanicalRpm);
-  const rpmBonus = rpmMargin * 12.0 - 1.5;
+  const rpmBonus = rpmMargin * 8.0;
 
   // I sigilli da 3.0mm migliorano sensibilmente la resistenza al boost (+25%)
   const thicknessTolerance = config.apexSealThicknessMm === 3.0 ? 1.25 : 1.0;
   const boostPenalty =
     config.turboType === 'NaturallyAspirated'
       ? 0
-      : (config.boostPressureBar * 6.5) / (sealSpec.shatterResistance * thicknessTolerance);
+      : (config.boostPressureBar * 7.5) / (sealSpec.shatterResistance * thicknessTolerance);
 
-  const portReliabilityPenalty = {
-    StandardSide: 0,
-    StreetPort: 2.5,
-    Bridgeport: 13.0,
-    SemiPeripheral: 17.5,
-    PeripheralPort: 25.0,
-  }[config.portType] ?? 0;
+  const isRacePremix =
+    config.referenceClass === 'Corsa' || config.oilMeteringSystemId === 'omp-premix-aviation';
+  const portReliabilityPenalty = isRacePremix
+    ? { StandardSide: 0, StreetPort: 1.5, Bridgeport: 5.5, SemiPeripheral: 7.0, PeripheralPort: 6.5 }[
+        config.portType
+      ] ?? 0
+    : {
+        StandardSide: 0,
+        StreetPort: 2.0,
+        Bridgeport: 10.0,
+        SemiPeripheral: 9.0,
+        PeripheralPort: 11.0,
+      }[config.portType] ?? 0;
 
-  // Contropressione termica del catalizzatore sul Wankel (scarico molto caldo >950°C):
-  const catalystReliabilityPenalty = catalystSpec.reliabilityPenaltyPetrolPercent * 1.8;
+  // Contropressione termica catalizzatore sui vecchi Wankel (ridotta su DLC/Cermet moderni Euro 4-7)
+  const modernSealCatMitigation =
+    sealSpec.id === 'seal-tool-steel-dlc' || sealSpec.id === 'seal-ceramic-si3n4' ? 0.25 : 0.85;
+  const catalystReliabilityPenalty =
+    catalystSpec.reliabilityPenaltyPetrolPercent * modernSealCatMitigation;
+
+  const vintageSealWearOffset =
+    sealSpec.id === 'seal-chilled-cast-iron'
+      ? config.priceTier === 'Economica'
+        ? -2.0
+        : 0.0
+      : 0.0;
+
+  const baseClassReliability =
+    config.priceTier === 'Lusso'
+      ? config.rotorCount >= 3 && config.turboType !== 'NaturallyAspirated'
+        ? 82.0
+        : 84.5
+      : config.priceTier === 'Premium'
+        ? config.referenceClass === 'Comfort'
+          ? 80.5
+          : 84.5
+        : config.referenceClass === 'Comfort'
+          ? 81.5
+          : config.priceTier === 'Media'
+            ? 85.0
+            : 75.5;
+
+  const streetPortModernPenalty =
+    config.portType === 'StreetPort' && config.catalystEra === 'Era3_MultiStage_DPF_SCR_2000s'
+      ? 2.2
+      : 0;
 
   const rawReliability =
-    maxReliabilityCeiling +
+    baseClassReliability +
     rpmBonus +
-    ompSpec.sealDurabilityBonusPercent * 0.15 +
-    housingSpec.wearResistance * 1.5 -
+    ompSpec.sealDurabilityBonusPercent * 0.14 +
+    (housingSpec.wearResistance - 1.0) * 3.0 +
+    (sealSpec.shatterResistance - 1.0) * 2.5 +
+    vintageSealWearOffset -
     boostPenalty -
     portReliabilityPenalty -
+    streetPortModernPenalty -
     catalystReliabilityPenalty -
     knockWarning.reliabilityPenaltyPercent +
     orientationAdapt.reliabilityDeltaPercent;

@@ -20,19 +20,18 @@ import {
 import {
   BATTERY_CHEMISTRIES,
   BATTERY_PACK_STRUCTURE_SPECS,
-  BENCH_MOTOR_SCALING_CONFIGS,
   BMS_CALIBRATION_SPECS,
   deriveBatteryPackTaxonomy,
   deriveElectricMotorTaxonomy,
   ELECTRIC_COOLING_SYSTEMS,
   ELECTRIC_MOTOR_TYPES,
+  getRotorMaterialSpecsForMotorType,
   HYBRID_SYSTEM_TYPES,
   INVERTER_POWER_ELECTRONICS_SPECS,
   MOTOR_HOUSING_SPECS,
   MOTOR_LAYOUT_CONFIGS,
   PRICE_TIER_EV_SPECS,
   REFERENCE_HYBRID_ICE_ENGINES,
-  ROTOR_MAGNET_MATERIAL_SPECS,
   ROTOR_SLEEVE_BEARING_SPECS,
   STATOR_WINDING_SPECS,
   UNDERBODY_SHIELD_SPECS,
@@ -910,6 +909,30 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
     [config.priceTier],
   );
 
+  const bearingSpec = useMemo(
+    () =>
+      ROTOR_SLEEVE_BEARING_SPECS.find((b) => b.id === config.rotorSleeveBearing) ??
+      ROTOR_SLEEVE_BEARING_SPECS[1],
+    [config.rotorSleeveBearing],
+  );
+
+  const inverterSpec = useMemo(
+    () =>
+      INVERTER_POWER_ELECTRONICS_SPECS.find((i) => i.id === config.inverterPowerElectronics) ??
+      INVERTER_POWER_ELECTRONICS_SPECS[2],
+    [config.inverterPowerElectronics],
+  );
+
+  const maxMotorRpmAllowed = useMemo(
+    () => Math.min(motorSpec.maxSafeRpm, bearingSpec.maxSafeRpm),
+    [motorSpec.maxSafeRpm, bearingSpec.maxSafeRpm],
+  );
+
+  const rotorMaterialSpecs = useMemo(
+    () => getRotorMaterialSpecsForMotorType(config.electricMotorType),
+    [config.electricMotorType],
+  );
+
   // Verifica compatibilità vano motore
   const isPureElectricContext = activeSubPanel === 'motor' || config.systemType === 'PureEV';
 
@@ -979,6 +1002,7 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
         packStructure: 'ModularAluminum',
         bmsCalibration: 'ConservativeLongevity',
         underbodyShield: 'StandardSteelShield',
+        maxMotorRpm: Math.min(prev.maxMotorRpm, 16000),
       }));
     } else if (preset === 'sedan') {
       setConfig((prev) => ({
@@ -1000,6 +1024,7 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
         packStructure: 'CellToPackCopper',
         bmsCalibration: 'RoadBalanced',
         underbodyShield: 'StandardSteelShield',
+        maxMotorRpm: Math.min(prev.maxMotorRpm, 20000),
       }));
     } else if (preset === 'performance') {
       setConfig((prev) => ({
@@ -1022,6 +1047,7 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
         packStructure: 'CellToChassisCTC',
         bmsCalibration: 'PerformanceSport',
         underbodyShield: 'StandardSteelShield',
+        maxMotorRpm: Math.min(prev.maxMotorRpm, 20000),
       }));
     } else {
       setConfig((prev) => ({
@@ -1060,7 +1086,7 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
         priceTier: config.priceTier,
         referenceClass: config.referenceClass,
         materialStress: {
-          materialName: `${motorSpec.shortName} + ${batterySpec.shortName} (${tierSpec.inverterShort})`,
+          materialName: `${motorSpec.shortName} + ${batterySpec.shortName} (${inverterSpec.shortName})`,
           materialResistanceFactor: motorSpec.powerMultiplier * 1.15,
           mechanicalStressFactor: config.referenceClass === 'Corsa' ? 1.45 : 1.05,
         },
@@ -1103,6 +1129,8 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
   };
 
   const isAsm = config.electricMotorType === 'InductionAsync';
+  const isEesm = config.electricMotorType === 'WoundRotorSync_EESM';
+  const hasZeroDragCoasting = motorSpec.hasZeroDragWhenCoasting;
   const showDisconnectControl =
     config.motorLayout === 'DualMotor_eAWD' ||
     config.motorLayout === 'TriMotor_TorqueVectoring' ||
@@ -1318,7 +1346,10 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
                           setConfig((prev) => ({
                             ...prev,
                             electricMotorType: mot.id,
-                            maxMotorRpm: Math.min(prev.maxMotorRpm, mot.maxSafeRpm),
+                            maxMotorRpm: Math.min(
+                              prev.maxMotorRpm,
+                              Math.min(mot.maxSafeRpm, bearingSpec.maxSafeRpm),
+                            ),
                           }))
                         }
                         className={`p-3 rounded-lg border text-left transition cursor-pointer flex flex-col justify-between ${
@@ -1413,14 +1444,16 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
                   <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-2">
                     <div className="flex justify-between items-center text-xs font-mono">
                       <span className="text-slate-300 font-semibold">Limitatore E-Motor:</span>
-                      <span className="text-sky-400 font-bold">{config.maxMotorRpm} RPM</span>
+                      <span className="text-sky-400 font-bold">
+                        {Math.min(config.maxMotorRpm, maxMotorRpmAllowed).toLocaleString('it-IT')} RPM
+                      </span>
                     </div>
                     <input
                       type="range"
-                      min={14000}
-                      max={motorSpec.maxSafeRpm}
-                      step={500}
-                      value={Math.min(config.maxMotorRpm, motorSpec.maxSafeRpm)}
+                      min={3000}
+                      max={maxMotorRpmAllowed}
+                      step={250}
+                      value={Math.max(3000, Math.min(config.maxMotorRpm, maxMotorRpmAllowed))}
                       onChange={(e) =>
                         setConfig((prev) => ({
                           ...prev,
@@ -1430,8 +1463,8 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
                       className="w-full accent-sky-500 cursor-pointer"
                     />
                     <div className="flex justify-between text-[10px] font-mono text-slate-500">
-                      <span>14.000 RPM</span>
-                      <span>{motorSpec.maxSafeRpm} RPM Max</span>
+                      <span>3.000 RPM</span>
+                      <span>{maxMotorRpmAllowed.toLocaleString('it-IT')} RPM Max ({bearingSpec.shortName})</span>
                     </div>
                   </div>
                 </div>
@@ -1478,7 +1511,11 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
                           <div className="font-bold flex items-center justify-between">
                             <span>{vSpec.name}</span>
                             <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-amber-300">
-                              ×{vSpec.powerMultiplier.toFixed(2)} CV
+                              {vSpec.voltage === 400
+                                ? '400V Std'
+                                : vSpec.voltage === 800
+                                  ? '+20% Allungo'
+                                  : '+28% Allungo'}
                             </span>
                           </div>
                           <div className="text-[10px] text-slate-400 mt-1">{vSpec.description}</div>
@@ -1636,7 +1673,16 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
                         <button
                           key={brg.id}
                           type="button"
-                          onClick={() => setConfig((prev) => ({ ...prev, rotorSleeveBearing: brg.id }))}
+                          onClick={() =>
+                            setConfig((prev) => ({
+                              ...prev,
+                              rotorSleeveBearing: brg.id,
+                              maxMotorRpm: Math.min(
+                                prev.maxMotorRpm,
+                                Math.min(motorSpec.maxSafeRpm, brg.maxSafeRpm),
+                              ),
+                            }))
+                          }
                           className={`p-2.5 rounded-lg border text-left transition cursor-pointer flex flex-col justify-between ${
                             isSelected
                               ? 'bg-sky-950/60 border-sky-500 text-sky-100 ring-1 ring-sky-500/40'
@@ -1663,15 +1709,37 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
                   </div>
                 </div>
 
-                {/* D) Materiale Magneti / Gabbia Rotore */}
+                {/* D) Materiale Magneti / Gabbia Rotore / Avvolgimento EESM */}
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-mono text-slate-300 uppercase tracking-wider flex items-center justify-between">
-                    <span>D) Materiale Magneti / Gabbia Rotore</span>
-                    <span className="text-sky-400 font-normal">Permeabilità & resistenza termica</span>
+                    <span>
+                      {isAsm
+                        ? 'D) Tecnologia Gabbia di Scoiattolo Rotore'
+                        : isEesm
+                          ? 'D) Avvolgimento & Eccitazione Rotore (EESM)'
+                          : 'D) Materiale Magneti Permanenti Rotore'}
+                    </span>
+                    <span className="text-sky-400 font-normal">
+                      {isAsm
+                        ? 'Conducibilità barre & scorrimento rotorico'
+                        : isEesm
+                          ? 'Densità corrente DC & trasferimento di campo'
+                          : 'Permeabilità & resistenza termica'}
+                    </span>
                   </label>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {ROTOR_MAGNET_MATERIAL_SPECS.map((mag) => {
+                    {rotorMaterialSpecs.map((mag) => {
                       const isSelected = config.rotorMagnetMaterial === mag.id;
+                      const badgeText =
+                        isAsm
+                          ? mag.torqueMultiplier >= 1.0
+                            ? `Gabbia +${Math.round((mag.torqueMultiplier - 1) * 100)}% Nm`
+                            : `Gabbia ${Math.round((mag.torqueMultiplier - 1) * 100)}% Nm`
+                          : isEesm
+                            ? mag.torqueMultiplier >= 1.0
+                              ? `Campo +${Math.round((mag.torqueMultiplier - 1) * 100)}% Nm`
+                              : `Campo ${Math.round((mag.torqueMultiplier - 1) * 100)}% Nm`
+                            : `${mag.torqueMultiplier >= 1.0 ? `+${Math.round((mag.torqueMultiplier - 1) * 100)}%` : `${Math.round((mag.torqueMultiplier - 1) * 100)}%`} Nm`;
                       return (
                         <button
                           key={mag.id}
@@ -1686,7 +1754,7 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
                           <div className="flex items-center justify-between gap-1">
                             <span className="font-bold text-xs">{mag.name}</span>
                             <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-amber-300 shrink-0">
-                              {mag.torqueMultiplier >= 1.0 ? `+${Math.round((mag.torqueMultiplier - 1) * 100)}%` : `${Math.round((mag.torqueMultiplier - 1) * 100)}%`} Nm
+                              {badgeText}
                             </span>
                           </div>
                           <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">{mag.description}</p>
@@ -2772,38 +2840,40 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
                 </section>
               )}
 
-              {/* 3. Configurazione Assi & Scala Lineare (1.0x, 0.92x, 2.0x, 3.0x, 4.0x) */}
+              {/* 3. Configurazione Assi & Tutti i 6 Layout Trazione (FWD, RWD, Mech-AWD 0.92x, 2x, 3x, 4x) */}
               <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-4">
                 <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                   <div className="flex items-center gap-2">
                     <Layers className="w-4 h-4 text-sky-400" />
                     <h2 className="text-xs font-bold font-mono uppercase tracking-wider text-slate-200">
-                      3. Configurazione Assi & Scala Multi-Motore (1×, 2×, 3×, 4×)
+                      3. Configurazione Assi & Layout Trazione (1× FWD/RWD, Mech-AWD 0.92×, 2×, 3×, 4×)
                     </h2>
                   </div>
                   <span className="text-[11px] font-mono text-emerald-400 font-semibold">
-                    Scala Lineare Banco: {layoutSpec.totalOutputMultiplier}×
+                    Scala Banco: {layoutSpec.totalOutputMultiplier.toFixed(2)}×
                   </span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
-                  {BENCH_MOTOR_SCALING_CONFIGS.map((lay) => {
-                    const isSelected = config.motorLayout === lay.layoutId;
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                  {MOTOR_LAYOUT_CONFIGS.map((lay) => {
+                    const isSelected = config.motorLayout === lay.id;
                     const effectivePenaltyPct =
-                      lay.motorCount > 1 && (isAsm || config.hasFrontDisconnect)
-                        ? '+2.0% consumo (Low-Drag)'
+                      lay.motorCount > 1 && (hasZeroDragCoasting || config.hasFrontDisconnect)
+                        ? `+${((lay.consumptionPenaltyWithDisconnect - 1) * 100).toFixed(1)}% consumo (Low-Drag)`
                         : lay.consumptionPenaltyMultiplier === 1.0
                           ? 'Rif. Ottimale (0% pen.)'
-                          : `+${((lay.consumptionPenaltyMultiplier - 1) * 100).toFixed(1)}% consumo`;
+                          : `+${((lay.consumptionPenaltyMultiplier - 1) * 100).toFixed(1)}% consumo${
+                              lay.id === 'SingleMotor_MechanicalAWD' ? ' • +38 kg' : ''
+                            }`;
 
                     return (
                       <button
-                        key={lay.layoutId}
+                        key={lay.id}
                         type="button"
                         onClick={() =>
                           setConfig((prev) => ({
                             ...prev,
-                            motorLayout: lay.layoutId,
+                            motorLayout: lay.id,
                             motorCount: lay.motorCount,
                           }))
                         }
@@ -2816,7 +2886,7 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
                         <div className="flex items-start justify-between gap-1">
                           <span className="font-bold text-xs">{lay.name}</span>
                           <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-amber-300 shrink-0">
-                            {lay.multiplierLabel}
+                            {lay.totalOutputMultiplier.toFixed(lay.totalOutputMultiplier === 0.92 ? 2 : 1)}×
                           </span>
                         </div>
                         <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
@@ -2844,13 +2914,20 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
                 {/* 4. Logica Sgancio Asse Secondario (Punto 4) */}
                 {showDisconnectControl && (
                   <div className="pt-2 border-t border-slate-800/80">
-                    {isAsm ? (
+                    {hasZeroDragCoasting ? (
                       <div className="flex items-center gap-2 p-3 rounded-lg border border-emerald-600/40 bg-emerald-950/30 font-mono text-xs text-emerald-200">
                         <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                         <div>
-                          <span className="font-bold">⚡ Spegnimento Elettronico Asse Integrato (ASM a Induzione):</span>
+                          <span className="font-bold">
+                            ⚡{' '}
+                            {isEesm
+                              ? 'Spegnimento Eccitazione Asse Integrato (EESM Rotore Avvolto):'
+                              : 'Spegnimento Elettronico Asse Integrato (ASM a Induzione):'}
+                          </span>
                           <p className="text-[10px] text-slate-300 mt-0.5">
-                            Il rotore a gabbia di scoiattolo non possiede magneti permanenti: a vuoto non genera alcun freno magnetico o resistenza di trascinamento. Spegnimento elettronico a <strong>costo $0</strong>, <strong>peso +0 kg</strong> e consumi ridotti di serie.
+                            {isEesm
+                              ? 'Azzerando la corrente DC sull’avvolgimento rotorico in veleggio il campo magnetico sparisce: zero perdite di trascinamento magnetico a costo $0 e peso +0 kg.'
+                              : 'Il rotore a gabbia di scoiattolo non possiede magneti permanenti: a vuoto non genera alcun freno magnetico o resistenza di trascinamento. Spegnimento elettronico a costo $0 e peso +0 kg.'}
                           </p>
                         </div>
                       </div>
@@ -2956,6 +3033,16 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
                     <span>5.5:1 (Allungo 350+ km/h)</span>
                     <span>9.0:1 (Bilanciato)</span>
                     <span>13.5:1 (Accelerazione Spinta)</span>
+                  </div>
+                  <div className="pt-1 border-t border-slate-800/70 flex justify-between items-center text-[10px] font-mono text-slate-400">
+                    <span>
+                      {config.gearboxType === 'TwoSpeedDualClutch'
+                        ? '1ª corta (×1.45) + 2ª lunga (-6% kWh)'
+                        : 'Riduttore diretto a rapporto singolo'}
+                    </span>
+                    <span className="text-emerald-300 font-bold">
+                      Spunto Ruote: {(telemetry.effectiveWheelTorqueNm ?? Math.round(telemetry.peakTorqueNm * config.gearRatio)).toLocaleString('it-IT')} Nm
+                    </span>
                   </div>
                 </div>
               </section>
@@ -3140,7 +3227,9 @@ export const ElectricHybridDesigner1C: React.FC<ElectricHybridDesignerProps> = (
                       : 'Telemetria Powertrain Completo'}
                 </span>
               </span>
-              <span className="text-[10px] text-amber-300">{tierSpec.inverterShort}</span>
+              <span className="text-[10px] text-amber-300">
+                {activeSubPanel === 'battery' ? batterySpec.shortName : inverterSpec.shortName}
+              </span>
             </h3>
 
             <div className="grid grid-cols-2 gap-2.5">

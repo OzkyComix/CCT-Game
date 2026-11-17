@@ -199,6 +199,8 @@ export function resolveChassisLayoutRules(params: {
   nativePrimaryAxle: 'FWD' | 'RWD';
   canUseLongitudinalFwd: boolean;
   hasAwdReady: boolean;
+  allowedDrivetrainModes: ChassisDrivetrainMode[];
+  effectiveDrivetrainMode: ChassisDrivetrainMode;
   resolvedDrivetrains: ('FWD' | 'RWD' | 'AWD')[];
   canUseTransaxle: boolean;
   canUseMidTunnel: boolean;
@@ -210,8 +212,32 @@ export function resolveChassisLayoutRules(params: {
   const canUseLongitudinalFwd =
     position === 'Anteriore' && orientation === 'Longitudinale' && engineSetbackPercent <= 35;
 
+  const isFrontMidTransverse =
+    position === 'Anteriore-Centrale' && orientation === 'Trasversale';
+  const isFrontTransverse =
+    position === 'Anteriore' && orientation === 'Trasversale';
+
+  let allowedDrivetrainModes: ChassisDrivetrainMode[];
+  let defaultDrivetrainMode: ChassisDrivetrainMode;
+
+  if (isFrontMidTransverse) {
+    // Anteriore-Centrale + Trasversale: abilita FWD_Only, FWD_AWD_Ready (oltre a RWD_AWD_Ready), fallback predefinito FWD_Only
+    allowedDrivetrainModes = ['FWD_Only', 'FWD_AWD_Ready', 'RWD_AWD_Ready'];
+    defaultDrivetrainMode = 'FWD_Only';
+  } else if (isFrontTransverse || (canUseLongitudinalFwd && allowLongitudinalFwd)) {
+    allowedDrivetrainModes = ['FWD_Only', 'FWD_AWD_Ready'];
+    defaultDrivetrainMode = 'FWD_Only';
+  } else {
+    allowedDrivetrainModes = ['RWD_Only', 'RWD_AWD_Ready'];
+    defaultDrivetrainMode = 'RWD_Only';
+  }
+
+  const effectiveDrivetrainMode = allowedDrivetrainModes.includes(drivetrainMode)
+    ? drivetrainMode
+    : defaultDrivetrainMode;
+
   let nativePrimaryAxle: 'FWD' | 'RWD' = 'RWD';
-  if (position === 'Anteriore' && orientation === 'Trasversale') {
+  if (isFrontTransverse || isFrontMidTransverse) {
     nativePrimaryAxle = 'FWD';
   } else if (canUseLongitudinalFwd && allowLongitudinalFwd) {
     nativePrimaryAxle = 'FWD';
@@ -219,7 +245,9 @@ export function resolveChassisLayoutRules(params: {
     nativePrimaryAxle = 'RWD';
   }
 
-  const hasAwdReady = drivetrainMode === 'FWD_AWD_Ready' || drivetrainMode === 'RWD_AWD_Ready';
+  const hasAwdReady =
+    effectiveDrivetrainMode === 'FWD_AWD_Ready' ||
+    effectiveDrivetrainMode === 'RWD_AWD_Ready';
   const resolvedDrivetrains: ('FWD' | 'RWD' | 'AWD')[] = hasAwdReady
     ? [nativePrimaryAxle, 'AWD']
     : [nativePrimaryAxle];
@@ -240,6 +268,8 @@ export function resolveChassisLayoutRules(params: {
     nativePrimaryAxle,
     canUseLongitudinalFwd,
     hasAwdReady,
+    allowedDrivetrainModes,
+    effectiveDrivetrainMode,
     resolvedDrivetrains,
     canUseTransaxle,
     canUseMidTunnel,
@@ -280,38 +310,70 @@ export function calculateChassisMetrics(
   const frontOverhangMm = Math.round(totalOverhang * frontOverhangRatio);
   const rearOverhangMm = totalOverhang - frontOverhangMm;
 
-  // Calcolo fisico del Vano Motore in base a Carreggiata, Passo, Arretramento e Altezza
+  // Calcolo fisico del Vano Motore in base a Carreggiata dedicata all'asse, Passo, Sbalzo anteriore, Arretramento e Altezza
   const isTransverse = primaryOri === 'Trasversale';
   const isLongitudinal = primaryOri === 'Longitudinale';
-  const avgTrack = (config.frontTrackMm + config.rearTrackMm) / 2;
 
-  // Lunghezza utile vano (fronte-retro)
+  // Lunghezza utile vano (fronte-retro):
+  // Cresce sia con il Passo (wheelbaseMm -> maggiore distanza dash-to-axle / spazio interasse)
+  // sia con lo Sbalzo anteriore / Lunghezza totale della scocca (lengthMm), orientamento, setback e transaxle.
   let baseBayLength = 540;
   if (primaryPos === 'Centrale-Posteriore') {
-    baseBayLength = Math.round(config.wheelbaseMm * 0.34);
-  } else if (primaryPos === 'Posteriore') {
-    baseBayLength = Math.round(rearOverhangMm * 0.62 + 120);
-  } else {
     baseBayLength = Math.round(
-      frontOverhangMm * 0.56 +
-        (isLongitudinal ? 160 : 40) +
+      config.wheelbaseMm * 0.24 +
+        lengthMm * 0.06 +
+        (isLongitudinal ? 60 : 10) +
+        (config.engineSetbackPercent / 100) * 55,
+    );
+  } else if (primaryPos === 'Posteriore') {
+    baseBayLength = Math.round(
+      config.wheelbaseMm * 0.11 +
+        lengthMm * 0.075 +
+        (isLongitudinal ? 80 : 15) +
+        (config.engineSetbackPercent / 100) * 65,
+    );
+  } else if (isLongitudinal) {
+    const frontMidBonus = primaryPos === 'Anteriore-Centrale' ? 28 : 0;
+    const transaxleBayBonus =
+      layoutRules.effectiveGearboxLayout === 'RearTransaxleTorqueTube' ? 55 : 0;
+    baseBayLength = Math.round(
+      config.wheelbaseMm * 0.18 +
+        frontOverhangMm * 0.32 +
+        95 +
+        frontMidBonus +
+        (config.engineSetbackPercent / 100) * 135 +
+        transaxleBayBonus,
+    );
+  } else {
+    const frontMidBonus = primaryPos === 'Anteriore-Centrale' ? 45 : 0;
+    baseBayLength = Math.round(
+      config.wheelbaseMm * 0.18 +
+        lengthMm * 0.045 -
+        85 +
+        frontMidBonus +
         (config.engineSetbackPercent / 100) * 140,
     );
   }
 
-  // Larghezza utile tra i duomi / longheroni
-  const trackForBay =
-    hasMidOrRear && !hasFrontEngine ? config.rearTrackMm : config.frontTrackMm;
+  // Larghezza utile tra i duomi / longheroni (solo asse dedicato: zero contaminazione tra avantreno e retrotreno)
+  const usesRearAxleBay = hasMidOrRear && !hasFrontEngine;
+  const trackForBay = usesRearAxleBay ? config.rearTrackMm : config.frontTrackMm;
+  const bayWidthTrackCoeff = usesRearAxleBay
+    ? isTransverse && !isLongitudinal
+      ? 0.54
+      : 0.59
+    : isTransverse && !isLongitudinal
+      ? 0.49
+      : 0.525;
   const baseBayWidth = Math.round(
-    trackForBay * (isTransverse && !isLongitudinal ? 0.49 : 0.525) +
-      (widthMm - avgTrack) * 0.14,
+    trackForBay * bayWidthTrackCoeff + (widthMm - trackForBay) * 0.14,
   );
 
-  // Altezza utile sotto cofano / vano
-  const bayHeightFactor =
-    primaryPos === 'Centrale-Posteriore' || primaryPos === 'Posteriore' ? 0.54 : 0.50;
+  // Altezza utile sotto cofano / vano (base minima duomi sospensioni + ~32% della variazione altezza corpo)
+  const bayHeightBaseMm =
+    primaryPos === 'Centrale-Posteriore' ? 339 : primaryPos === 'Posteriore' ? 245 : 242;
   const baseBayHeight = Math.round(
-    (heightMm - config.groundClearanceMm) * bayHeightFactor - 10,
+    bayHeightBaseMm + (heightMm - config.groundClearanceMm) * 0.32,
   );
 
   const extraL = config.engineBayExtraLengthMm ?? 0;
@@ -334,24 +396,42 @@ export function calculateChassisMetrics(
     centerOfGravityDeltaMm: Number(((extraH / 10) * 3.5).toFixed(1)),
   };
 
-  // Punto 1: Curva rinforzo (logaritmica oltre 35% per Spaceframe Alluminio)
+  // Punto 1: Curva rinforzo continua (logaritmica oltre 35% per Spaceframe Alluminio) + sezione chiusa e passo continuo
   const r = config.rigidityReinforcementPercent;
   const reinforcementGain =
     structure.usesDiminishingReinforcement && r > 35
-      ? 0.147 + 0.085 * Math.log1p((r - 35) / 18)
-      : (r / 100) * 0.42;
-  const reinforcementMultiplier = 1 + reinforcementGain;
+      ? 1.32 * 0.35 + 0.60 * Math.log1p((r - 35) / 22)
+      : (r / 100) * 1.32;
+  const reinforcementMultiplier = 0.90 + reinforcementGain;
+  const safetyCellRigidityBonus = 1 + (config.safetyStructurePercent / 100) * 0.20;
 
-  const wheelbaseRigidityFactor = Math.max(0.75, Math.min(1.18, 2700 / config.wheelbaseMm));
-  const clearancePenalty = Math.max(0.84, 1 - Math.max(0, config.groundClearanceMm - 140) * 0.0012);
-  const awdTunnelBonus = layoutRules.hasAwdReady ? 1.05 : 1.0;
+  const wheelbaseRigidityFactor = Math.pow(2650 / config.wheelbaseMm, 0.42);
+  const cabinHeightMm = Math.max(850, heightMm - config.groundClearanceMm);
+  const crossSectionHeightFactor = structure.isBodyOnFrame
+    ? Math.pow(1680 / 1300, 0.65) * Math.pow(cabinHeightMm / 1680, 0.20)
+    : Math.pow(cabinHeightMm / 1300, 0.65);
+  const crossSectionFactor =
+    Math.pow(widthMm / 1820, 0.75) * crossSectionHeightFactor;
+  const rawEraJoining = 0.80 + 0.20 / (1 + Math.exp(-(currentYear - 1986) / 4.0));
+  const usesDiscreteFrameEra = Boolean(structure.isBodyOnFrame || structure.maxSupportedTorqueNm);
+  const eraRigidityFactor = usesDiscreteFrameEra
+    ? 1 + (rawEraJoining - 1) * 0.30
+    : rawEraJoining;
+  const clearancePenalty = Math.max(
+    0.82,
+    1 - Math.max(0, config.groundClearanceMm - 140) * 0.0020,
+  );
+  const awdTunnelBonus = layoutRules.hasAwdReady ? 1.04 : 1.0;
   const transaxleRigidityBonus =
-    layoutRules.effectiveGearboxLayout === 'RearTransaxleTorqueTube' ? 1.08 : 1.0;
+    layoutRules.effectiveGearboxLayout === 'RearTransaxleTorqueTube' ? 1.04 : 1.0;
 
   const torsionalRigidityNmPerDeg = Math.round(
     structure.baseRigidityNmPerDeg *
       wheelbaseRigidityFactor *
+      crossSectionFactor *
+      eraRigidityFactor *
       reinforcementMultiplier *
+      safetyCellRigidityBonus *
       clearancePenalty *
       awdTunnelBonus *
       transaxleRigidityBonus *
@@ -376,18 +456,41 @@ export function calculateChassisMetrics(
     ),
   );
 
-  // Massa base del pianale (kg)
+  // Massa base del pianale (kg): nucleo telaietti/longheroni + guscio 3D multi-dimensionale + tunnel trasmissione + rinforzi
   const volumeIndex = (lengthMm * widthMm) / (4500 * 1820);
-  const awdTunnelWeightAdd = layoutRules.hasAwdReady ? 18 : 0;
+  const avgTrackMm = (config.frontTrackMm + config.rearTrackMm) / 2;
+  const dimensionalMassIndex =
+    0.55 * volumeIndex +
+    0.30 * (config.wheelbaseMm / 2700) +
+    0.12 * (heightMm / 1450) +
+    0.03 * (avgTrackMm / 1550);
+  const coreSubframeKg = structure.isBodyOnFrame
+    ? 128
+    : structure.weightMultiplier <= 0.65
+      ? 54
+      : 9;
+  const awdTunnelWeightAdd = layoutRules.hasAwdReady ? 17 : 0;
+  const rwdTunnelWeightAdd =
+    config.drivetrainMode.startsWith('RWD') &&
+    hasFrontEngine &&
+    layoutRules.effectiveGearboxLayout !== 'RearTransaxleTorqueTube'
+      ? 24
+      : 0;
+  const torqueTubeWeightAdd =
+    layoutRules.effectiveGearboxLayout === 'RearTransaxleTorqueTube' ? 50 : 0;
+  const reinforcementMassMaterialScale = structure.weightMultiplier <= 0.50 ? 0.12 : 1.0;
   const reinforcementWeightAdd =
-    (config.rigidityReinforcementPercent / 100) * 26 +
-    (config.safetyStructurePercent / 100) * 24;
+    ((config.rigidityReinforcementPercent / 100) * 16 * reinforcementMassMaterialScale +
+      (config.safetyStructurePercent / 100) * 51) *
+    (0.16 + 0.84 * structure.weightMultiplier);
 
   const baseWeightKg = Math.round(
-    (265 * volumeIndex * structure.weightMultiplier +
+    coreSubframeKg +
+      205 * dimensionalMassIndex * structure.weightMultiplier +
       awdTunnelWeightAdd +
-      reinforcementWeightAdd) *
-      (structure.isBodyOnFrame ? 1.12 : 1.0) +
+      rwdTunnelWeightAdd +
+      torqueTubeWeightAdd +
+      reinforcementWeightAdd +
       bayToleranceImpact.weightDeltaKg,
   );
 

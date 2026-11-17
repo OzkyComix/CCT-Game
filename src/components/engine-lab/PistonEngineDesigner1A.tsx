@@ -59,7 +59,6 @@ import type {
   PistonArchitecture,
   PriceTier,
   ReferenceClass,
-  TurboCountConfig,
   TurboPosition,
   TurboType,
 } from '../../types/gameTypes';
@@ -369,38 +368,20 @@ export const PistonEngineDesigner1A: React.FC<PistonEngineDesigner1AProps> = ({
         ? 'Lateral'
         : config.turboPosition;
 
-    const currentTurboCountSpec = TURBO_COUNT_CONFIGS.find(
-      (tc) => tc.id === config.turboCountConfig,
-    );
-    const validTurboCount: TurboCountConfig =
-      currentTurboCountSpec && validCyl >= currentTurboCountSpec.minCylinders
-        ? config.turboCountConfig
-        : 'SingleTurbo';
-
     setConfig((prev) => ({
       ...prev,
       architecture: newArch,
       cylinders: validCyl,
       bankAngleDeg: validAngle,
       turboPosition: validTurboPos,
-      turboCountConfig: validTurboCount,
     }));
   };
 
-  // Cambio numero cilindri con validazione numero turbine (Punto 2)
+  // Cambio numero cilindri (1x, 2x, 3x e 4x turbine restano sempre sbloccati per qualsiasi frazionamento)
   const handleCylinderChange = (cyl: number) => {
-    const currentTurboCountSpec = TURBO_COUNT_CONFIGS.find(
-      (tc) => tc.id === config.turboCountConfig,
-    );
-    const validTurboCount: TurboCountConfig =
-      currentTurboCountSpec && cyl >= currentTurboCountSpec.minCylinders
-        ? config.turboCountConfig
-        : 'SingleTurbo';
-
     setConfig((prev) => ({
       ...prev,
       cylinders: cyl,
-      turboCountConfig: validTurboCount,
     }));
   };
 
@@ -430,10 +411,9 @@ export const PistonEngineDesigner1A: React.FC<PistonEngineDesigner1AProps> = ({
     const nextCompression =
       newFuel === 'Diesel'
         ? Math.max(15.5, config.compressionRatio)
-        : Math.min(
-            12.5,
-            config.compressionRatio > 14 ? 9.5 : config.compressionRatio,
-          );
+        : config.compressionRatio > 16.0
+          ? 9.5
+          : config.compressionRatio;
 
     const nextManualRpm =
       newFuel === 'Diesel'
@@ -1177,7 +1157,7 @@ export const PistonEngineDesigner1A: React.FC<PistonEngineDesigner1AProps> = ({
                 </div>
                 <input
                   type="range"
-                  min={config.fuelType === 'Diesel' ? 14.0 : 7.0}
+                  min={config.fuelType === 'Diesel' ? 14.0 : 6.0}
                   max={config.fuelType === 'Diesel' ? 22.0 : 16.0}
                   step={0.1}
                   value={config.compressionRatio}
@@ -1191,7 +1171,7 @@ export const PistonEngineDesigner1A: React.FC<PistonEngineDesigner1AProps> = ({
                 />
                 <div className="text-[10px] flex justify-between">
                   <span className="text-slate-500">
-                    {config.fuelType === 'Diesel' ? '14.0:1' : '7.0:1 (Alto Boost)'}
+                    {config.fuelType === 'Diesel' ? '14.0:1' : '6.0:1 (Boost Estremo)'}
                   </span>
                   <span
                     className={
@@ -1629,33 +1609,28 @@ export const PistonEngineDesigner1A: React.FC<PistonEngineDesigner1AProps> = ({
                   {/* Punto 2: Selettore Configurazione e Numero Turbine */}
                   <div>
                     <label className="block text-slate-400 mb-1.5 text-[11px] uppercase">
-                      Configurazione e Numero di Turbine (Vincolato al numero di cilindri:{' '}
-                      {config.cylinders})
+                      Configurazione e Numero di Turbine
                     </label>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                       {TURBO_COUNT_CONFIGS.map((tc) => {
-                        const allowed = config.cylinders >= tc.minCylinders;
                         const active = config.turboCountConfig === tc.id;
                         return (
                           <button
                             type="button"
                             key={tc.id}
-                            disabled={!allowed}
                             onClick={() =>
                               setConfig((p) => ({ ...p, turboCountConfig: tc.id }))
                             }
                             className={`p-2.5 rounded-lg border text-left transition ${
-                              !allowed
-                                ? 'bg-slate-900/40 border-slate-900 text-slate-600 cursor-not-allowed'
-                                : active
-                                  ? 'bg-sky-500/20 border-sky-400 text-sky-200 cursor-pointer'
-                                  : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700 cursor-pointer'
+                              active
+                                ? 'bg-sky-500/20 border-sky-400 text-sky-200 cursor-pointer'
+                                : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700 cursor-pointer'
                             }`}
                           >
                             <div className="flex justify-between font-bold">
                               <span>{tc.label}</span>
                               <span className="text-[10px] text-amber-300">
-                                Costo {tc.costMultiplier}x • Min {tc.minCylinders} cil.
+                                Costo {tc.costMultiplier}x • {tc.turbineCount}x
                               </span>
                             </div>
                             <div className="text-[10px] text-slate-400 mt-0.5">

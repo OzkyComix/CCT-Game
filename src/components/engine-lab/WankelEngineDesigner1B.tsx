@@ -38,6 +38,7 @@ import {
   calculateMaxSafeWankelRpm,
   calculateWankelCosts,
   calculateWankelGeometryAndDimensions,
+  evaluateWankelKnockAndStress,
   getActiveWankelTurboStages,
   getActiveWankelTurboStagesAr,
   simulateWankelEngineDyno,
@@ -116,8 +117,8 @@ export const WankelEngineDesigner1B: React.FC<WankelEngineDesignerProps> = ({
     turboCountConfig: 'TwinTurbo',
     turboBearingType: 'BallBearing',
     turboArRatio: 0.65,
-    turboStagesArRatios: [0.65, 0.65],
-    turboStagesDiametersMm: [52, 52],
+    turboStagesArRatios: [0.65, 0.65, 0.65, 0.65],
+    turboStagesDiametersMm: [59, 59, 59, 59],
     boostPressureBar: 0.85,
     turboPosition: 'Lateral',
     manualRedlineRpm: 8200,
@@ -910,8 +911,8 @@ export const WankelEngineDesigner1B: React.FC<WankelEngineDesignerProps> = ({
               </div>
               <input
                 type="range"
-                min={8.0}
-                max={11.5}
+                min={6.5}
+                max={14.5}
                 step={0.1}
                 value={config.compressionRatio}
                 onChange={(e) =>
@@ -922,17 +923,34 @@ export const WankelEngineDesigner1B: React.FC<WankelEngineDesignerProps> = ({
                 }
                 className="w-full"
               />
-              <div className="text-[10px] flex justify-between">
-                <span className="text-slate-500">8.0:1 (Alto Boost)</span>
-                <span
-                  className={
-                    telemetry.knockWarning?.isKnocking
-                      ? 'text-red-400 font-bold'
-                      : 'text-emerald-400'
-                  }
-                >
-                  Max sicuro: {telemetry.knockWarning?.maxSafeCr ?? 10.4}:1
-                </span>
+              <div className="text-[10px] flex items-center justify-between gap-2">
+                <span className="text-slate-500">6.5:1 (Boost Estremo)</span>
+                <div className="flex items-center gap-2">
+                  {telemetry.knockWarning &&
+                    Math.abs(config.compressionRatio - telemetry.knockWarning.maxSafeCr) >= 0.1 && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setConfig((p) => ({
+                            ...p,
+                            compressionRatio: telemetry.knockWarning!.maxSafeCr,
+                          }))
+                        }
+                        className="px-1.5 py-0.5 rounded bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-700 text-emerald-300 font-bold cursor-pointer"
+                      >
+                        Imposta Ottimale ({telemetry.knockWarning.maxSafeCr.toFixed(1)}:1)
+                      </button>
+                    )}
+                  <span
+                    className={
+                      telemetry.knockWarning?.isKnocking
+                        ? 'text-red-400 font-bold'
+                        : 'text-emerald-400'
+                    }
+                  >
+                    Ottimale / Max sicuro: {telemetry.knockWarning?.maxSafeCr ?? 9.3}:1
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -1324,9 +1342,20 @@ export const WankelEngineDesigner1B: React.FC<WankelEngineDesignerProps> = ({
                 </label>
                 <select
                   value={config.turboType}
-                  onChange={(e) =>
-                    setConfig((p) => ({ ...p, turboType: e.target.value as TurboType }))
-                  }
+                  onChange={(e) => {
+                    const nextTurbo = e.target.value as TurboType;
+                    setConfig((p) => {
+                      const nextDraft = { ...p, turboType: nextTurbo };
+                      const nextKnock = evaluateWankelKnockAndStress(nextDraft);
+                      let nextCr = p.compressionRatio;
+                      if (nextTurbo !== 'NaturallyAspirated' && p.compressionRatio > nextKnock.maxSafeCr) {
+                        nextCr = nextKnock.maxSafeCr;
+                      } else if (nextTurbo === 'NaturallyAspirated' && p.compressionRatio < 9.5) {
+                        nextCr = 10.0;
+                      }
+                      return { ...nextDraft, compressionRatio: nextCr };
+                    });
+                  }}
                   className="w-full px-3 py-2 rounded bg-slate-950 border border-slate-700 text-slate-100 font-mono text-xs"
                 >
                   {TURBO_SYSTEMS.map((tb) => (
@@ -1410,12 +1439,20 @@ export const WankelEngineDesigner1B: React.FC<WankelEngineDesignerProps> = ({
                       max={2.5}
                       step={0.05}
                       value={config.boostPressureBar}
-                      onChange={(e) =>
-                        setConfig((p) => ({
-                          ...p,
-                          boostPressureBar: Number(e.target.value),
-                        }))
-                      }
+                      onChange={(e) => {
+                        const newBoost = Number(e.target.value);
+                        setConfig((p) => {
+                          const prevSafe = evaluateWankelKnockAndStress(p).maxSafeCr;
+                          const nextDraft = { ...p, boostPressureBar: newBoost };
+                          const nextSafe = evaluateWankelKnockAndStress(nextDraft).maxSafeCr;
+                          const wasWithinSafe = p.compressionRatio <= prevSafe + 0.1;
+                          const nextCr =
+                            wasWithinSafe && nextSafe < p.compressionRatio
+                              ? nextSafe
+                              : p.compressionRatio;
+                          return { ...nextDraft, compressionRatio: nextCr };
+                        });
+                      }}
                       className="w-full"
                     />
                   </div>
@@ -1527,8 +1564,8 @@ export const WankelEngineDesigner1B: React.FC<WankelEngineDesignerProps> = ({
                             className="w-full"
                           />
                           <div className="flex justify-between text-[10px] text-slate-500">
-                            <span>Ø 36mm (0.35 A/R)</span>
-                            <span>Ø 86mm (1.40 A/R)</span>
+                            <span>Ø 45mm (0.35 A/R)</span>
+                            <span>Ø 92mm (1.40 A/R)</span>
                           </div>
                         </div>
                       );

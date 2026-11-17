@@ -296,6 +296,7 @@ export type ElectricMotorType =
   | 'InductionAsync'
   | 'PermanentMagnetSync'
   | 'IPM_SynRM'
+  | 'WoundRotorSync_EESM'
   | 'AxialFlux';
 
 export type MotorLayoutConfig =
@@ -393,7 +394,7 @@ export interface ElectricMotorSpec {
   // Campi retrocompatibili derivati
   priceTier: PriceTier;
   referenceClass: ReferenceClass;
-  maxMotorRpm?: number; // 14000 - 24000 rpm
+  maxMotorRpm?: number; // 3000 - 24000 rpm
 }
 
 /**

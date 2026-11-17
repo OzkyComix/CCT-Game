@@ -140,16 +140,16 @@ export const ELECTRIC_MOTOR_TYPES: ElectricMotorTypeSpec[] = [
     minYear: 1990,
     unlockCost: { capitalCost: 2_500_000, rdCost: 40, minYear: 1990 },
     baseEfficiencyPercent: 91.5,
-    powerMultiplier: 0.88,
-    torqueMultiplier: 0.86,
+    powerMultiplier: 0.85,
+    torqueMultiplier: 0.85,
     weightMultiplier: 1.12,
     baseCornerRpm: 5800,
-    maxSafeRpm: 18500,
+    maxSafeRpm: 20000,
     costPerKw: 11,
     hasZeroDragWhenCoasting: true,
     rareEarthDependency: 'Zero',
     description:
-      'Economico e robusto, zero terre rare e nessun freno magnetico a vuoto (dimezza la penalità di consumo sui Dual-Motor AWD). Densità di coppia media.',
+      'Economico e robusto, zero terre rare e nessun freno magnetico a vuoto (dimezza la penalità di consumo sui Dual-Motor AWD). Ottimo allungo di Field Weakening grazie al flusso rotorico controllato.',
   },
   {
     id: 'PermanentMagnetSync',
@@ -158,16 +158,16 @@ export const ELECTRIC_MOTOR_TYPES: ElectricMotorTypeSpec[] = [
     minYear: 1997,
     unlockCost: { capitalCost: 6_000_000, rdCost: 80, minYear: 1997 },
     baseEfficiencyPercent: 95.5,
-    powerMultiplier: 1.10,
-    torqueMultiplier: 1.18,
-    weightMultiplier: 0.95,
-    baseCornerRpm: 6500,
-    maxSafeRpm: 18000,
+    powerMultiplier: 1.00,
+    torqueMultiplier: 1.00,
+    weightMultiplier: 1.00,
+    baseCornerRpm: 5267,
+    maxSafeRpm: 24000,
     costPerKw: 18,
     hasZeroDragWhenCoasting: false,
     rareEarthDependency: 'Alta',
     description:
-      'Elevatissima efficienza energetica e spinta immediata fin da 0 RPM. Richiede magneti in terre rare e genera trascinamento magnetico ad alta velocità.',
+      'Elevatissima efficienza energetica e spinta immediata fin da 0 RPM. Richiede magneti in terre rare; con camicia in carbonio raggiunge i 24.000 RPM.',
   },
   {
     id: 'IPM_SynRM',
@@ -177,15 +177,33 @@ export const ELECTRIC_MOTOR_TYPES: ElectricMotorTypeSpec[] = [
     unlockCost: { capitalCost: 11_000_000, rdCost: 140, minYear: 2015 },
     baseEfficiencyPercent: 94.8,
     powerMultiplier: 1.18,
-    torqueMultiplier: 1.08,
-    weightMultiplier: 0.92,
-    baseCornerRpm: 7400,
-    maxSafeRpm: 20000,
+    torqueMultiplier: 1.04,
+    weightMultiplier: 0.96,
+    baseCornerRpm: 5980,
+    maxSafeRpm: 24000,
     costPerKw: 14,
     hasZeroDragWhenCoasting: false,
     rareEarthDependency: 'Ridotta',
     description:
-      'Ottimo compromesso costo/efficienza: sfrutta la riluttanza magnetica del rotore per estendere il plateau di Field Weakening ed erogare più CV del PSM agli alti regimi.',
+      'Ottimo compromesso costo/efficienza: sfrutta la riluttanza magnetica del rotore per estendere il plateau di Field Weakening (+14% corner speed) ed erogare più CV del PSM agli alti regimi.',
+  },
+  {
+    id: 'WoundRotorSync_EESM',
+    name: 'Sincrono a Rotore Avvolto (EESM — Eccitazione Esterna)',
+    shortName: 'EESM Rotore Avvolto',
+    minYear: 2012,
+    unlockCost: { capitalCost: 8_500_000, rdCost: 110, minYear: 2012 },
+    baseEfficiencyPercent: 94.8,
+    powerMultiplier: 1.11,
+    torqueMultiplier: 0.95,
+    weightMultiplier: 1.06,
+    baseCornerRpm: 6150,
+    maxSafeRpm: 20000,
+    costPerKw: 13,
+    hasZeroDragWhenCoasting: true,
+    rareEarthDependency: 'Zero',
+    description:
+      'Rotore privo di magneti permanenti con avvolgimento eccitato in DC (stile Renault 5AQ / BMW Gen5 eDrive): regolazione attiva del Field Weakening ad alta velocità, zero trascinamento magnetico a vuoto e zero terre rare (+3–5 kg rotore/eccitatore).',
   },
   {
     id: 'AxialFlux',
@@ -194,16 +212,16 @@ export const ELECTRIC_MOTOR_TYPES: ElectricMotorTypeSpec[] = [
     minYear: 2020,
     unlockCost: { capitalCost: 26_000_000, rdCost: 320, minYear: 2020 },
     baseEfficiencyPercent: 96.8,
-    powerMultiplier: 1.58,
-    torqueMultiplier: 1.65,
+    powerMultiplier: 1.45,
+    torqueMultiplier: 1.55,
     weightMultiplier: 0.56,
-    baseCornerRpm: 8200,
-    maxSafeRpm: 22000,
+    baseCornerRpm: 4200,
+    maxSafeRpm: 24000,
     costPerKw: 34,
     hasZeroDragWhenCoasting: false,
     rareEarthDependency: 'Alta',
     description:
-      'Compattezza estrema e peso dimezzato (-44% massa): densità di coppia e potenza mostruosa per supercar e hypercar elettriche/ibride.',
+      'Statore privo di giogo ferromagnetico e peso quasi dimezzato (-50% massa nucleo): densità di coppia estrema su dischi a grande diametro per supercar e hypercar.',
   },
 ];
 
@@ -211,7 +229,7 @@ export interface MotorLayoutSpec {
   id: MotorLayoutConfig;
   name: string;
   shortName: string;
-  motorCount: number;
+  motorCount: BenchElectricMotorCount;
   drivetrainType: 'FWD' | 'RWD' | 'eAWD';
   torqueVectoring: boolean;
   /** Moltiplicatore potenza totale rispetto al singolo motore */
@@ -493,34 +511,34 @@ export const VOLTAGE_ARCHITECTURES: VoltageArchitectureSpec[] = [
     voltage: 400,
     name: 'Architettura 400V Standard',
     badge: '400V Std',
-    powerMultiplier: 0.90,
+    powerMultiplier: 0.97,
     efficiencyBonusPercent: 0.0,
-    cornerSpeedBonusRpm: 0,
+    cornerSpeedBonusRpm: -900,
     cableWeightKg: 28,
     costMultiplier: 1.0,
-    description: 'Tensione standard per citycar e berline: componenti economici ma cavi in rame più spessi e pesanti.',
+    description: 'Tensione standard per citycar e berline: cavi in rame più pesanti (+4 kg bus motore) e Back-EMF che limita prima la Corner Speed.',
   },
   {
     voltage: 800,
     name: 'Architettura 800V Alta Potenza',
     badge: '800V Ultra-Fast',
-    powerMultiplier: 1.08,
+    powerMultiplier: 1.00,
     efficiencyBonusPercent: 2.2,
     cornerSpeedBonusRpm: 1100,
     cableWeightKg: 15,
     costMultiplier: 1.18,
-    description: 'Dimezza gli ampere a parità di kW: riduce il calore dissipato, alleggerisce i cablaggi (-13 kg) ed estende il Field Weakening.',
+    description: 'Dimezza gli ampere a parità di kW: vince la Back-EMF estendendo del +20% la Corner Speed (CV agli alti giri) e alleggerisce i cablaggi (-13 kg).',
   },
   {
     voltage: 1000,
     name: 'Architettura 1000V+ Motorsport / Hypercar',
     badge: '1000V+ Hyper',
-    powerMultiplier: 1.22,
+    powerMultiplier: 1.02,
     efficiencyBonusPercent: 3.5,
-    cornerSpeedBonusRpm: 2100,
+    cornerSpeedBonusRpm: 1650,
     cableWeightKg: 11,
     costMultiplier: 1.42,
-    description: 'Altissima tensione da competizione/hypercar (stile Lucid/Formula E): massima potenza di picco e allungo estremo.',
+    description: 'Altissima tensione da competizione/hypercar (stile Lucid/Formula E Gen3): massima Corner Speed e minime perdite resistive.',
   },
 ];
 
@@ -748,57 +766,57 @@ export const STATOR_WINDING_SPECS: StatorWindingSpec[] = [
     id: 'RoundWireStandard',
     name: 'Filo Tondo Standard (Riempimento 45%)',
     shortName: 'Filo Tondo 45%',
-    powerMultiplier: 0.92, // -8% CV
-    torqueMultiplier: 0.92, // -8% Nm
+    powerMultiplier: 0.75,
+    torqueMultiplier: 0.96,
     highRpmPowerMultiplier: 0.90,
     cost: 0,
     rdCost: 0,
     weightDeltaKg: 0,
     efficiencyBonusPercent: -0.8,
     reliabilityDeltaPercent: 0,
-    description: 'Economico e base (-8% CV/Nm): riempimento cava limitato (45%) e dissipazione termica standard.',
+    description: 'Economico e base: riempimento cava 45%, minore coppia (-4%) e maggiore induttanza che anticipa il Field Weakening (-22% Corner Speed).',
   },
   {
     id: 'HairpinFlat',
     name: 'Barre Piatte Hairpin (Riempimento 70%)',
     shortName: 'Hairpin 70%',
-    powerMultiplier: 1.06, // +6% CV
-    torqueMultiplier: 1.06, // +6% Nm
-    highRpmPowerMultiplier: 1.06,
+    powerMultiplier: 1.00,
+    torqueMultiplier: 1.00,
+    highRpmPowerMultiplier: 1.02,
     cost: 280,
     rdCost: 45,
-    weightDeltaKg: -2.0,
+    weightDeltaKg: -1.5,
     efficiencyBonusPercent: +1.2,
     reliabilityDeltaPercent: +4,
-    description: 'Costo medio (+6% CV/Nm): barre rettangolari a forcina, riempimento cava 70% e migliore dissipazione.',
+    description: 'Riferimento moderno: barre rettangolari a forcina, riempimento cava 70% e buona dissipazione termica.',
   },
   {
     id: 'HairpinContinuousMultiLayer',
     name: 'Hairpin Continuo Multi-Strato',
     shortName: 'Hairpin Multi-Strato',
-    powerMultiplier: 1.12, // +12% CV
-    torqueMultiplier: 1.12, // +12% Nm
-    highRpmPowerMultiplier: 1.14,
+    powerMultiplier: 1.16,
+    torqueMultiplier: 1.08,
+    highRpmPowerMultiplier: 1.16,
     cost: 650,
     rdCost: 95,
-    weightDeltaKg: -3.5,
+    weightDeltaKg: -2.5,
     efficiencyBonusPercent: +2.2,
     reliabilityDeltaPercent: +6,
-    description: 'Costo alto (+12% CV/Nm): avvolgimento continuo multi-strato privo di saldature di testa, massima efficienza.',
+    description: 'Avvolgimento continuo multi-strato (+8% Nm, +8% Corner Speed): massima densità di rame senza saldature di testa.',
   },
   {
     id: 'LitzRacingWire',
     name: 'Filo Litz / Rame Puro Racing',
     shortName: 'Filo Litz Racing',
-    powerMultiplier: 1.18, // +18% CV agli alti regimi
-    torqueMultiplier: 1.10, // +10% Nm
+    powerMultiplier: 1.11,
+    torqueMultiplier: 0.91,
     highRpmPowerMultiplier: 1.25,
     cost: 1450,
     rdCost: 210,
-    weightDeltaKg: -5.0,
+    weightDeltaKg: -3.5,
     efficiencyBonusPercent: +3.0,
     reliabilityDeltaPercent: +8,
-    description: 'Costo altissimo (+18% CV agli alti regimi): trefoli isolati singolarmente, minime perdite per effetto pelle oltre 18.000 RPM.',
+    description: 'Trefoli isolati singolarmente (+21% Corner Speed, zero effetto pelle ad alta frequenza): privilegia l’allungo e i CV ad altissimi RPM.',
   },
 ];
 
@@ -824,13 +842,13 @@ export const INVERTER_POWER_ELECTRONICS_SPECS: InverterPowerElectronicsSpec[] = 
     shortName: 'IGBT Silicio (88%)',
     mappedInverterTech: 'Silicon_IGBT',
     efficiencyPercent: 88.0,
-    powerMultiplier: 0.90, // -10% CV
-    torqueMultiplier: 0.90, // -10% Nm
+    powerMultiplier: 0.81,
+    torqueMultiplier: 0.99,
     cost: 180,
     rdCost: 0,
-    weightDeltaKg: +6.0,
+    weightDeltaKg: +1.7,
     reliabilityDeltaPercent: 0,
-    description: 'Basso costo, efficienza 88%, -10% potenza/coppia di picco e radiatore termico maggiorato (+6 kg).',
+    description: 'Basso costo, efficienza 88%, frequenza 16 kHz (-18% Corner Speed / -19% CV) e modulo di potenza più pesante (+1.7 kg).',
   },
   {
     id: 'Silicon_MOSFET',
@@ -844,7 +862,7 @@ export const INVERTER_POWER_ELECTRONICS_SPECS: InverterPowerElectronicsSpec[] = 
     rdCost: 40,
     weightDeltaKg: 0,
     reliabilityDeltaPercent: +3,
-    description: 'Costo medio, efficienza 93%, erogazione e potenza base 1.0x equilibrata.',
+    description: 'Costo medio, efficienza 93%, erogazione e modulazione 1.0x equilibrata per auto stradali.',
   },
   {
     id: 'SiliconCarbide_SiC',
@@ -852,13 +870,13 @@ export const INVERTER_POWER_ELECTRONICS_SPECS: InverterPowerElectronicsSpec[] = 
     shortName: 'SiC MOSFET (97.5%)',
     mappedInverterTech: 'SiliconCarbide_SiC',
     efficiencyPercent: 97.5,
-    powerMultiplier: 1.14, // +14% CV/Nm
-    torqueMultiplier: 1.14,
+    powerMultiplier: 1.09,
+    torqueMultiplier: 1.03,
     cost: 950,
     rdCost: 110,
-    weightDeltaKg: -4.0,
+    weightDeltaKg: -2.3,
     reliabilityDeltaPercent: +8,
-    description: 'Costo elevato, efficienza 97.5%, +14% CV/Nm, basse perdite di commutazione e minore calore.',
+    description: 'Efficienza 97.5%, commutazione rapida 95 kHz (+3% Nm, +6% Corner Speed), inverter compatto (-2.3 kg) e basse perdite termiche.',
   },
   {
     id: 'Dual_SiC_GaN_Racing',
@@ -866,13 +884,13 @@ export const INVERTER_POWER_ELECTRONICS_SPECS: InverterPowerElectronicsSpec[] = 
     shortName: 'Dual SiC/GaN Corsa (98.5%)',
     mappedInverterTech: 'GalliumNitride_GaN',
     efficiencyPercent: 98.5,
-    powerMultiplier: 1.28, // +28% CV/Nm
-    torqueMultiplier: 1.28,
+    powerMultiplier: 1.34,
+    torqueMultiplier: 1.25,
     cost: 2400,
     rdCost: 260,
-    weightDeltaKg: -6.0,
+    weightDeltaKg: -3.7,
     reliabilityDeltaPercent: -4,
-    description: 'Costo estremo, efficienza 98.5%, +28% CV/Nm di picco; correnti di fase enormi e stress termico superiore.',
+    description: 'Doppia modulazione GaN/SiC ad altissima corrente di fase (+25% Nm, +7% Corner Speed, 98.5% eff.): densità da hypercar e Formula E.',
   },
 ];
 
@@ -892,24 +910,24 @@ export const ROTOR_SLEEVE_BEARING_SPECS: RotorSleeveBearingSpec[] = [
   {
     id: 'SteelLaminationStandard',
     name: 'Lamierini Acciaio + Cuscinetti Acciaio Standard',
-    shortName: 'Acciaio Std (14k RPM)',
-    maxSafeRpm: 14000,
+    shortName: 'Acciaio Std (16k RPM)',
+    maxSafeRpm: 16000,
     cost: 0,
     rdCost: 0,
     weightDeltaKg: 0,
     reliabilityDeltaPercent: 0,
-    description: 'Economico: lamierini convenzionali e cuscinetti a sfere in acciaio, limitato a 14.000 RPM.',
+    description: 'Economico: lamierini convenzionali e cuscinetti in acciaio, regime sicuro fino a 16.000 RPM (-4% Nm / -11% Corner Speed).',
   },
   {
     id: 'InconelSleeveHybrid',
     name: 'Camicia Inconel + Cuscinetti Ibridi',
-    shortName: 'Inconel Ibridi (18k RPM)',
-    maxSafeRpm: 18000,
+    shortName: 'Inconel Ibridi (20k RPM)',
+    maxSafeRpm: 20000,
     cost: 380,
     rdCost: 50,
-    weightDeltaKg: -1.5,
+    weightDeltaKg: -0.4,
     reliabilityDeltaPercent: +6,
-    description: 'Costo medio: camicia in lega Inconel, permette fino a 18.000 RPM con maggiore affidabilità.',
+    description: 'Camicia di contenimento in Inconel e cuscinetti ibridi: permette fino a 20.000 RPM sicuri con attriti ridotti.',
   },
   {
     id: 'CarbonPrepregCeramic',
@@ -918,9 +936,9 @@ export const ROTOR_SLEEVE_BEARING_SPECS: RotorSleeveBearingSpec[] = [
     maxSafeRpm: 24000,
     cost: 1150,
     rdCost: 160,
-    weightDeltaKg: -5.0,
+    weightDeltaKg: -1.2,
     reliabilityDeltaPercent: +10,
-    description: 'Costo molto alto: rotore fasciato in carbonio pre-preg, permette fino a 24.000 RPM senza cedimento centrifugo (-attriti, -peso).',
+    description: 'Rotore fasciato in carbonio pre-preg + cuscinetti ceramici Si3N4: sblocca fino a 24.000 RPM su motori sincroni/assiali (+6% Nm, zero correnti parassite).',
   },
 ];
 
@@ -940,15 +958,15 @@ export interface RotorMagnetMaterialSpec {
 export const ROTOR_MAGNET_MATERIAL_SPECS: RotorMagnetMaterialSpec[] = [
   {
     id: 'FerriteStandardCage',
-    name: 'Ferrite / Gabbia Alluminio Standard',
-    shortName: 'Ferrite (No Terre Rare)',
-    torqueMultiplier: 0.85, // -15%
-    powerMultiplier: 0.85,
+    name: 'Magneti in Ferrite Ceramica (Zero Terre Rare)',
+    shortName: 'Ferrite (Zero Terre Rare)',
+    torqueMultiplier: 0.90,
+    powerMultiplier: 1.03,
     cost: -250,
     rdCost: 0,
-    weightDeltaKg: +4.0,
-    thermalDemagnetizationResistance: 'Standard',
-    description: 'Molto economico, zero terre rare, -15% coppia/potenza ma totale indipendenza dalle fluttuazioni di mercato.',
+    weightDeltaKg: +2.0,
+    thermalDemagnetizationResistance: 'Buona (fino a 200°C)',
+    description: 'Zero terre rare (-10% Nm ma controllo campo in Field Weakening +15% Corner Speed): economica e resistente alla smagnetizzazione.',
   },
   {
     id: 'NeodymiumNdFeB',
@@ -960,33 +978,152 @@ export const ROTOR_MAGNET_MATERIAL_SPECS: RotorMagnetMaterialSpec[] = [
     rdCost: 30,
     weightDeltaKg: 0,
     thermalDemagnetizationResistance: 'Buona (fino a 120°C)',
-    description: 'Costo medio, coppia e potenza 1.0x standard per motori elettrici stradali.',
+    description: 'Costo medio, flusso e densità di coppia 1.0x standard per motori elettrici stradali.',
   },
   {
     id: 'NeodymiumDyUH',
     name: 'Neodimio-Disprosio Alta Temperatura (NdFeB-UH 200°C)',
     shortName: 'NdFeB-UH 200°C',
-    torqueMultiplier: 1.10, // +10%
-    powerMultiplier: 1.06,
+    torqueMultiplier: 1.05,
+    powerMultiplier: 1.08,
     cost: 520,
     rdCost: 80,
-    weightDeltaKg: -1.0,
+    weightDeltaKg: -0.5,
     thermalDemagnetizationResistance: 'Superiore (fino a 200°C)',
-    description: 'Costo alto (+10% coppia): additivato con Disprosio, resiste al surriscaldamento fino a 200°C senza smagnetizzarsi.',
+    description: 'Additivato con Disprosio (+5% Nm, +2.6% Corner Speed): mantiene la coercitività fino a 200°C senza smagnetizzarsi.',
   },
   {
     id: 'SamariumCobaltRacing',
     name: 'Samario-Cobalto (SmCo) / Leghe Permendur Racing',
     shortName: 'SmCo / Permendur',
-    torqueMultiplier: 1.18, // +18%
-    powerMultiplier: 1.18,
+    torqueMultiplier: 1.20,
+    powerMultiplier: 1.21,
     cost: 1350,
     rdCost: 190,
-    weightDeltaKg: -2.5,
+    weightDeltaKg: -1.2,
     thermalDemagnetizationResistance: 'Estrema (oltre 300°C)',
-    description: 'Costo estremo (+18% coppia/potenza continua): stabilità magnetica totale anche sotto stress estremo prolungato in pista.',
+    description: 'Massima energia magnetica ad alta temperatura (+20% Nm, stabilità oltre 300°C) per motori da competizione ed hypercar.',
   },
 ];
+
+export const INDUCTION_ROTOR_CAGE_SPECS: RotorMagnetMaterialSpec[] = [
+  {
+    id: 'FerriteStandardCage',
+    name: 'Gabbia in Alluminio Pressofuso',
+    shortName: 'Gabbia Alluminio',
+    torqueMultiplier: 0.95,
+    powerMultiplier: 0.92,
+    cost: -250,
+    rdCost: 0,
+    weightDeltaKg: -1.0,
+    thermalDemagnetizationResistance: 'Standard (160°C)',
+    description: 'Economica, maggiore resistenza rotorica e scorrimento: ideale per applicazioni stradali accessibili a zero terre rare.',
+  },
+  {
+    id: 'NeodymiumNdFeB',
+    name: 'Gabbia in Rame Pressofuso',
+    shortName: 'Gabbia Rame',
+    torqueMultiplier: 1.0,
+    powerMultiplier: 1.0,
+    cost: 0,
+    rdCost: 30,
+    weightDeltaKg: 0,
+    thermalDemagnetizationResistance: 'Buona (200°C)',
+    description: 'Conducibilità superiore e minori perdite Joule rotoriche rispetto alla gabbia in alluminio pressofuso.',
+  },
+  {
+    id: 'NeodymiumDyUH',
+    name: 'Gabbia in Rame Brasato ad Alta Densità',
+    shortName: 'Rame Brasato LDU',
+    torqueMultiplier: 1.03,
+    powerMultiplier: 1.04,
+    cost: 340,
+    rdCost: 70,
+    weightDeltaKg: +0.5,
+    thermalDemagnetizationResistance: 'Superiore (240°C)',
+    description: 'Stile Tesla LDU Perf.: barre in rame brasato ad alta corrente di spunto e superiore tenuta termica continua.',
+  },
+  {
+    id: 'SamariumCobaltRacing',
+    name: 'Gabbia Rame-Argento Aeronautico CNC',
+    shortName: 'Rame-Argento CNC',
+    torqueMultiplier: 1.06,
+    powerMultiplier: 1.08,
+    cost: 790,
+    rdCost: 140,
+    weightDeltaKg: +0.2,
+    thermalDemagnetizationResistance: 'Estrema (oltre 300°C)',
+    description: 'Massima conducibilità elettrica e tenuta centrifuga da competizione per motori ad induzione ad alte prestazioni.',
+  },
+];
+
+export const EESM_ROTOR_WINDING_SPECS: RotorMagnetMaterialSpec[] = [
+  {
+    id: 'FerriteStandardCage',
+    name: 'Rotore Avvolto a Spazzole Standard',
+    shortName: 'Avvolto a Spazzole',
+    torqueMultiplier: 0.93,
+    powerMultiplier: 0.93,
+    cost: -150,
+    rdCost: 0,
+    weightDeltaKg: +3.5,
+    thermalDemagnetizationResistance: 'Anelli Grafite Std',
+    description: 'Anelli collettori in grafite standard: avvolgimento rotorico in rame eccitato in DC, zero terre rare e zero trascinamento magnetico.',
+  },
+  {
+    id: 'NeodymiumNdFeB',
+    name: 'Rotore Avvolto ad Alta Densità di Rame',
+    shortName: 'Avvolto Alta Densità',
+    torqueMultiplier: 1.0,
+    powerMultiplier: 1.03,
+    cost: 0,
+    rdCost: 35,
+    weightDeltaKg: +4.0,
+    thermalDemagnetizationResistance: 'Isolamento Classe H',
+    description: 'Fattore di riempimento rotorico ottimizzato per una densità di flusso superiore ed eccellente rendimento ai carichi parziali.',
+  },
+  {
+    id: 'NeodymiumDyUH',
+    name: 'Rotore Avvolto Raffreddato a Liquido (Gen5)',
+    shortName: 'Avvolto Liquido Gen5',
+    torqueMultiplier: 1.01,
+    powerMultiplier: 1.10,
+    cost: 190,
+    rdCost: 75,
+    weightDeltaKg: +4.5,
+    thermalDemagnetizationResistance: 'Raffreddamento Interno',
+    description: 'Alta densità di corrente di eccitazione continua (stile BMW Gen5 eDrive): estende il Field Weakening a costi inferiori rispetto a NdFeB DyUH.',
+  },
+  {
+    id: 'SamariumCobaltRacing',
+    name: 'Eccitatore Induttivo Brushless ad Alta Frequenza',
+    shortName: 'Induttivo Brushless HF',
+    torqueMultiplier: 1.10,
+    powerMultiplier: 1.28,
+    cost: 480,
+    rdCost: 145,
+    weightDeltaKg: +3.8,
+    thermalDemagnetizationResistance: 'Zero Attrito Spazzole',
+    description: 'Zero attrito spazzole con trasferimento induttivo racing ad alta frequenza: usura nulla e costi nettamente inferiori a SmCo.',
+  },
+];
+
+/**
+ * Restituisce i descrittori fisici e UI dei 4 materiali/tecnologie rotore coerenti
+ * con la topologia scelta (`InductionAsync`, `WoundRotorSync_EESM`, oppure motori a magneti permanenti),
+ * mantenendo gli ID stabili per la retrocompatibilità con i motori salvati.
+ */
+export function getRotorMaterialSpecsForMotorType(
+  motorType: ElectricMotorType,
+): RotorMagnetMaterialSpec[] {
+  if (motorType === 'InductionAsync') {
+    return INDUCTION_ROTOR_CAGE_SPECS;
+  }
+  if (motorType === 'WoundRotorSync_EESM') {
+    return EESM_ROTOR_WINDING_SPECS;
+  }
+  return ROTOR_MAGNET_MATERIAL_SPECS;
+}
 
 export interface MotorHousingSpec {
   id: MotorHousingType;
@@ -1015,24 +1152,24 @@ export const MOTOR_HOUSING_SPECS: MotorHousingSpec[] = [
   {
     id: 'AcousticDampedActiveNVH',
     name: 'Carcassa Silenziata con Supporti Attivi NVH',
-    shortName: 'NVH Silenziata (+4 kg)',
+    shortName: 'NVH Silenziata (+15 kg)',
     cost: 450,
     rdCost: 60,
-    weightDeltaKg: +4.0,
+    weightDeltaKg: +15.0,
     nvhComfortScore: +15,
     reliabilityDeltaPercent: +5,
-    description: '+4 kg, +costo: azzera il fischio dell’inverter per berline di lusso e comfort, riducendo le micro-vibrazioni (+durata).',
+    description: '+15 kg per doppia parete acustica e incapsulamento NVH: abbatte il fischio dell’inverter e riduce le micro-vibrazioni (+5% aff.).',
   },
   {
     id: 'MagnesiumCarbonUltralight',
     name: 'Magnesio e Carbonio Ultraleggero (Corsa)',
-    shortName: 'Magnesio-Carbonio (-22% peso)',
+    shortName: 'Magnesio-Carbonio (-60% carcassa)',
     cost: 1100,
     rdCost: 150,
     weightDeltaKg: -7.5,
     nvhComfortScore: -12,
     reliabilityDeltaPercent: 0,
-    description: '-22% sul peso della carcassa, costo elevato: lega magnesio con flange in carbonio, zero insonorizzazione acustica.',
+    description: 'Lega ultraleggera di magnesio e fondelli in carbonio (-60% peso carcassa rispetto all’alluminio), zero insonorizzazione.',
   },
   {
     id: 'ArmoredSealedIP69K',
@@ -1043,7 +1180,7 @@ export const MOTOR_HOUSING_SPECS: MotorHousingSpec[] = [
     weightDeltaKg: +12.0,
     nvhComfortScore: +5,
     reliabilityDeltaPercent: +20,
-    description: '+12 kg, +costo: protezione totale da fango, sabbia, rocce e guadi profondi ad alta pressione (+affidabilità gravosa).',
+    description: '+12 kg, protezione totale da fango, sabbia, rocce e guadi profondi ad alta pressione (+20% affidabilità).',
   },
 ];
 

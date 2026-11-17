@@ -912,7 +912,6 @@ export interface TurboCountSpec {
   id: TurboCountConfig;
   label: string;
   turbineCount: number;
-  minCylinders: number;
   costMultiplier: number;
   weightMultiplier: number;
   spoolRpmBonus: number;
@@ -925,7 +924,6 @@ export const TURBO_COUNT_CONFIGS: TurboCountSpec[] = [
     id: 'SingleTurbo',
     label: 'Single Turbo (1 Turbina)',
     turbineCount: 1,
-    minCylinders: 2,
     costMultiplier: 1.0,
     weightMultiplier: 1.0,
     spoolRpmBonus: 0,
@@ -937,37 +935,34 @@ export const TURBO_COUNT_CONFIGS: TurboCountSpec[] = [
     id: 'TwinTurbo',
     label: 'Biturbo / Twin-Turbo (2 Turbine Personalizzabili)',
     turbineCount: 2,
-    minCylinders: 4,
     costMultiplier: 1.85,
     weightMultiplier: 1.6,
     spoolRpmBonus: -380,
     highRpmFlowBonus: 1.15,
     description:
-      'Due turbine configurabili singolarmente (uguali in parallelo o asimmetriche/sequenziali): +portata d’aria e risposta immediata.',
+      'Due turbine configurabili singolarmente (parallelo o asimmetrico/sequenziale): raddoppia l’area compressore e anticipa lo spool.',
   },
   {
     id: 'TripleTurbo',
     label: 'Triple-Turbo (3 Turbine Stadio Multiplo)',
     turbineCount: 3,
-    minCylinders: 6,
     costMultiplier: 2.95,
     weightMultiplier: 2.15,
     spoolRpmBonus: -580,
     highRpmFlowBonus: 1.26,
     description:
-      'Tre turbocompressori configurabili: elimina il turbo-lag e garantisce una portata d’aria enorme fino al limitatore.',
+      'Tre turbocompressori sequenziali/paralleli (stile N57S): elimina il turbo-lag ed estende la portata agli alti regimi.',
   },
   {
     id: 'QuadTurbo',
-    label: 'Quad-Turbo (4 Turbine — V8/V10/V12/W16)',
+    label: 'Quad-Turbo (4 Turbine)',
     turbineCount: 4,
-    minCylinders: 8,
     costMultiplier: 4.1,
     weightMultiplier: 2.7,
-    spoolRpmBonus: -520,
+    spoolRpmBonus: -680,
     highRpmFlowBonus: 1.38,
     description:
-      'Quattro turbine dedicate (stile EB110 / Chiron W16): quadrupla area compressore, zero contropressione e potenza estrema.',
+      'Quattro turbine dedicate (stile B57S / EB110 / Chiron): quadrupla area compressore, minima contropressione e massima portata.',
   },
 ];
 
@@ -986,36 +981,38 @@ export const TURBO_POSITIONS: {
   {
     id: 'Front',
     label: 'Turbina Frontale / Anteriore',
-    lengthAddMm: 135,
-    widthAddMm: 20,
-    heightAddMm: 15,
+    lengthAddMm: 105,
+    widthAddMm: 0,
+    heightAddMm: 0,
     requiresVOrW: false,
     turboCostMultiplier: 1.0,
     reliabilityDeltaPercent: 0.0,
-    description: 'Costo base (1.0x), aumenta la Lunghezza (L), affidabilità neutra (0%).',
+    description:
+      'Costo base (1.0x), aumenta SOLO la Lunghezza (L) davanti al blocco (W=0, H=0), affidabilità neutra (0%).',
   },
   {
     id: 'Lateral',
-    label: 'Turbine Laterali Esterne',
-    lengthAddMm: 18,
-    widthAddMm: 155,
-    heightAddMm: 15,
+    label: 'Turbine Laterali / Sotto-Bancata',
+    lengthAddMm: 0,
+    widthAddMm: 75,
+    heightAddMm: 0,
     requiresVOrW: false,
     turboCostMultiplier: 1.05,
     reliabilityDeltaPercent: -1.0,
-    description: 'Costo medio (+5%), aumenta la Larghezza (W) nel vano, affidabilità -1%.',
+    description:
+      'Costo +5%: aumenta SOLO la Larghezza (W) sul fianco scarico o sotto-bancata Boxer (L=0, H=0), affidabilità -1%.',
   },
   {
     id: 'HotV',
     label: 'Configurazione Hot-V (Dentro la V)',
-    lengthAddMm: 12,
-    widthAddMm: 15,
-    heightAddMm: 48,
+    lengthAddMm: 0,
+    widthAddMm: 0,
+    heightAddMm: 22,
     requiresVOrW: true,
     turboCostMultiplier: 1.25,
     reliabilityDeltaPercent: -3.5,
     description:
-      'Solo V/W (60°–120°): abbatte la Larghezza (W) e migliora lo spool, +25% costo turbo e -3.5% affidabilità per calore nella V.',
+      'Solo V/W (60°–120°): turbine nella valle tra bancate (L=0, W=0, H=0 fino A/R 0.70 poi +15..30 mm); +25% costo turbo e -3.5% affidabilità.',
   },
 ];
 
