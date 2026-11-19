@@ -399,10 +399,12 @@ export const Chassis3DViewport: React.FC<Chassis3DViewportProps> = ({
 
     const tireRadius = Math.min(385, Math.max(275, 290 + GC * 0.42));
     const tireWidth = Math.min(275, Math.max(175, Wcar * 0.125));
-    const centerZ = Hcar * 0.44;
+    // Riferimento verticale stabile ancorato al piano stradale (Z=0) e scala basata sulla lunghezza:
+    // variare groundClearanceMm solleva/abbassa fisicamente la scocca rispetto a ruote e asfalto
+    const centerZ = 720;
 
-    // Fattore scala viewport auto-adattivo
-    const maxSpan = Math.max(L * 1.12, Wcar * 1.55, Hcar * 1.85);
+    // Fattore scala viewport ancorato alle dimensioni orizzontali stabili (no rescaling aggressivo su Hcar)
+    const maxSpan = Math.max(L * 1.12, Wcar * 1.55, 3100);
     const basePxPerMm = (Math.min(W * 0.84, H * 0.78) / maxSpan) * camera.zoom;
 
     const yaw = degToRad(camera.yawDeg);

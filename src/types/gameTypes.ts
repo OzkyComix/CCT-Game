@@ -900,3 +900,327 @@ export interface VehicleEntity {
   developmentCost: DualCurrencyCost;
 }
 
+// ============================================================================
+// 8. FASE 2.2: SCOCCA, CARROZZERIA, SICUREZZA PASSIVA & AERODINAMICA
+// ============================================================================
+
+export type BodyMaterialId =
+  | 'mat-steel'
+  | 'mat-galvanized-hss'
+  | 'mat-grp-smc'
+  | 'mat-aluminum'
+  | 'mat-alu-composite'
+  | 'mat-carbon-prepreg';
+
+export type AirbagPackageId =
+  | 'airbag-none'
+  | 'airbag-driver'
+  | 'airbag-dual-front'
+  | 'airbag-six-curtain'
+  | 'airbag-ten-precrash';
+
+export type FrontAeroType = 'none' | 'road-lip' | 'track-splitter' | 'splitter-canards';
+
+export type RearAeroType = 'none' | 'ducktail-lip' | 'gt-wing' | 'swan-neck-wing';
+
+export type UnderbodyAeroType =
+  | 'exposed'
+  | 'road-faired'
+  | 'flat-floor-diffuser'
+  | 'venturi-ground-effect';
+
+export type ActiveAeroType =
+  | 'none'
+  | 'retractable-spoiler'
+  | 'drs-active-wing'
+  | 'full-active-airbrake';
+
+export interface BodyAeroConfig {
+  id: string;
+  name: string;
+  chassisId: string;
+  year: number;
+  bodyStyle: BodyStyle;
+  bodyMaterialId: BodyMaterialId;
+  /** Levigatezza galleria del vento / maniglie a filo / giunzioni (0..100) */
+  aeroRefinementPercent: number;
+  /** Apertura prese raffreddamento (10..100): scambia capacità termica con delta Cx */
+  coolingAperturePercent: number;
+  /** Barre anti-intrusione porte, rinforzi montanti e zone a deformazione (0..100) */
+  passiveSafetyReinforcementPercent: number;
+  airbagPackageId: AirbagPackageId;
+  frontAero: { type: FrontAeroType; angleDeg: number };
+  rearAero: { type: RearAeroType; angleDeg: number };
+  underbodyType: UnderbodyAeroType;
+  activeAeroType: ActiveAeroType;
+}
+
+export interface BodyAeroDownforceBreakdown {
+  highDownforce: number;
+  lowDrag: number;
+  frontKg: number;
+  rearKg: number;
+}
+
+export interface BodyAeroSafetyBreakdown {
+  chassisCellScore: number;
+  bodyPassiveScore: number;
+  airbagRestraintScore: number;
+  bottleneckNote: string | null;
+}
+
+export interface BodyAeroMetrics {
+  frontalAreaM2: number;
+  cxHighDownforce: number;
+  cxLowDrag: number;
+  cxAirbrake: number;
+  scxHighDownforce: number;
+  scxLowDrag: number;
+  clFront: number;
+  clRear: number;
+  clTotalHighDownforce: number;
+  clTotalLowDrag: number;
+  clSaturated: boolean;
+  aeroRegime: 'lift' | 'neutral' | 'downforce';
+  hiddenBlowoverRisk: number;
+  aeroEfficiencyLD: number;
+  downforce200Kg: BodyAeroDownforceBreakdown;
+  downforce300Kg: BodyAeroDownforceBreakdown;
+  aeroBalanceFrontPercent: number;
+  aeroBalanceRearPercent: number;
+  groundEffectEfficiency: number;
+  coolingEfficiencyScore: number;
+  bodyPanelsWeightKg: number;
+  safetyWeightKg: number;
+  aeroWeightKg: number;
+  totalBodyAeroWeightKg: number;
+  crashTestScore: number;
+  euroNcapStars: number;
+  safetyBreakdown: BodyAeroSafetyBreakdown;
+  unitManufacturingCost: number;
+  developmentCost: DualCurrencyCost;
+  estimatedDurabilityKm: number;
+  warnings: string[];
+}
+
+export interface SavedBodyAero {
+  id: string;
+  name: string;
+  chassisId: string;
+  createdYear: number;
+  paidCapitalCost?: number;
+  paidRdCost?: number;
+  config: BodyAeroConfig;
+  metrics: BodyAeroMetrics;
+}
+
+// ============================================================================
+// 9. FASE 2.3: TRASMISSIONE, RAPPORTI, AWD, STERZO, SOSPENSIONI, ESC & FRENI
+// ============================================================================
+
+export type SteeringType =
+  | 'manual-rack'
+  | 'hydraulic-hps'
+  | 'electro-hydraulic'
+  | 'electric-eps'
+  | 'steer-by-wire';
+
+export type TransmissionType =
+  | 'manual-h'
+  | 'manual-dogleg'
+  | 'auto-torque-converter'
+  | 'auto-modern-lockup'
+  | 'automated-single-clutch'
+  | 'dct-dry'
+  | 'dct-wet'
+  | 'cvt'
+  | 'sequential-race'
+  | 'ev-single-speed'
+  | 'ev-two-speed';
+
+export type AwdScheme23 =
+  | 'awd-fwd-haldex'
+  | 'awd-transverse-perf'
+  | 'awd-longitudinal-perm'
+  | 'awd-4wd-heavy-lowrange';
+
+export type DifferentialType =
+  | 'open'
+  | 'viscous-lsd'
+  | 'mechanical-clutch-lsd'
+  | 'torsen-helical'
+  | 'electronic-torque-vectoring'
+  | 'offroad-locking';
+
+export type SuspensionType =
+  | 'solid-axle-leaf'
+  | 'solid-axle-coil'
+  | 'torsion-beam'
+  | 'macpherson'
+  | 'double-wishbone'
+  | 'multi-link'
+  | 'pushrod-inboard';
+
+export type GearboxStrengthTier = 'compact' | 'standard' | 'heavy-duty' | 'motorsport';
+
+export type StabilityDriveMode = 'road' | 'sport' | 'track' | 'offroad' | 'custom';
+
+export type StabilityControlType =
+  | 'none'
+  | 'abs-only'
+  | 'abs-racing'
+  | 'abs-tcs'
+  | 'esc-standard'
+  | 'esc-sport-variable'
+  | 'esc-motorsport-imu';
+
+export type AbsModuleType = 'none' | 'abs-road' | 'abs-racing';
+
+export type TcsModuleType = 'none' | 'tcs-standard' | 'tcs-sport' | 'tcs-motorsport-imu';
+
+export type EscModuleType = 'none' | 'esc-standard' | 'esc-sport' | 'esc-motorsport-imu';
+
+export type BrakeCaliperType =
+  | 'drum'
+  | 'floating-1p'
+  | 'floating-2p'
+  | 'fixed-4p'
+  | 'fixed-6p'
+  | 'fixed-8p-race';
+
+export type BrakeDiscType =
+  | 'solid-iron'
+  | 'vented-iron'
+  | 'drilled-slotted-iron'
+  | 'carbon-ceramic'
+  | 'carbon-carbon';
+
+export interface DrivetrainSetupConfig {
+  id: string;
+  name: string;
+  year: number;
+  chassisId: string;
+  engineId: string;
+  drivetrainType: 'FWD' | 'RWD' | 'AWD';
+  awdScheme: AwdScheme23 | null;
+  transmissionType: TransmissionType;
+  gearboxStrengthTier?: GearboxStrengthTier;
+  gearCount: number;
+  gearRatios: number[];
+  finalDriveRatio: number;
+  tireRadiusMm: number;
+  rimDiameterInch?: number;
+  tireSidewallMm?: number;
+  staggeredWheels?: boolean;
+  frontRimDiameterInch?: number;
+  frontTireSidewallMm?: number;
+  rearRimDiameterInch?: number;
+  rearTireSidewallMm?: number;
+  differentialType: DifferentialType;
+  steeringType: SteeringType;
+  rearWheelSteering: boolean;
+  steeringRatio?: number;
+  progressiveSteering?: boolean;
+  speedSensitiveSteering?: boolean;
+  rwsMaxAngleDeg?: number;
+  rwsCrossoverSpeedKmh?: number;
+  frontSuspension: SuspensionType;
+  rearSuspension: SuspensionType;
+  stabilityControlType: StabilityControlType;
+  absType?: AbsModuleType;
+  tcsType?: TcsModuleType;
+  escType?: EscModuleType;
+  hasDriveModeSelector?: boolean;
+  stabilityControlThresholdPercent: number;
+  stabilityDriveMode?: StabilityDriveMode;
+  absSlipThresholdPercent?: number;
+  tcsSlipThresholdPercent?: number;
+  escYawThresholdPercent?: number;
+  frontCaliper: BrakeCaliperType;
+  frontDiscType: BrakeDiscType;
+  frontDiscMm: number;
+  rearCaliper: BrakeCaliperType;
+  rearDiscType: BrakeDiscType;
+  rearDiscMm: number;
+}
+
+export interface GearTelemetryPoint {
+  gear: number;
+  ratio: number;
+  totalRatio: number;
+  speedAtPeakPowerKmh: number;
+  speedAtRedlineKmh: number;
+  rpmAfterUpshift: number;
+  rpmDropPercent: number;
+  maxWheelTorqueNm: number;
+}
+
+export interface DrivetrainWeightBreakdownKg {
+  gearboxKg: number;
+  awdHardwareKg: number;
+  differentialKg: number;
+  steeringKg: number;
+  suspensionKg: number;
+  brakesKg: number;
+  totalMechatronicsKg: number;
+}
+
+export interface DrivetrainSetupMetrics {
+  drivetrainLossPercent: number;
+  wheelPeakPowerHp: number;
+  wheelPeakTorqueNm: number;
+  maxWheelTorqueFirstGearNm: number;
+  lowRangeFirstGearTorqueNm: number | null;
+  gearboxTorqueCapacityNm: number;
+  torqueOverloadRatio: number;
+  shiftTimeMs: number;
+  awdStaticSplitFrontPercent: number;
+  awdLayoutMapped: AWDLayoutType;
+  gearsTelemetry: GearTelemetryPoint[];
+  theoreticalTopSpeedKmh: number;
+  cruisingRpmAt130Kmh: number;
+  effectiveTireRadiusMm: number;
+  frontTireRadiusMm: number;
+  rearTireRadiusMm: number;
+  maxFrontDiscMm: number;
+  maxRearDiscMm: number;
+  resolvedEngineOrientation: EngineOrientation | 'N/A';
+  engineFitNote: string;
+  steeringPrecisionScore: number;
+  turningCircleM: number;
+  frontGripGeometryScore: number;
+  rearGripGeometryScore: number;
+  rideComfortScore: number;
+  offRoadArticulationScore: number;
+  suspensionPairingScore: number;
+  suspensionPairingNote: string | null;
+  gearboxStrengthTier: GearboxStrengthTier;
+  stabilityDriveMode: StabilityDriveMode;
+  frontBrakeTorqueNm: number;
+  rearBrakeTorqueNm: number;
+  brakeBiasFrontPercent: number;
+  brakeThermalCapacityKj: number;
+  brakeCoolingRateKw: number;
+  stabilityInterventionFactor: number;
+  tractionLaunchFactor: number;
+  weightBreakdownKg: DrivetrainWeightBreakdownKg;
+  unitManufacturingCost: number;
+  developmentCost: DualCurrencyCost;
+  estimatedDurabilityKm: number;
+  isCompatibleWithChassis: boolean;
+  compatibilityErrors: string[];
+  warnings: string[];
+}
+
+export interface SavedDrivetrainSetup {
+  id: string;
+  name: string;
+  chassisId: string;
+  engineId: string;
+  createdYear: number;
+  paidCapitalCost?: number;
+  paidRdCost?: number;
+  config: DrivetrainSetupConfig;
+  metrics: DrivetrainSetupMetrics;
+}
+

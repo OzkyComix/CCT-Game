@@ -824,12 +824,22 @@ export const ChassisDesigner21: React.FC = () => {
                   max={260}
                   step={5}
                   value={config.groundClearanceMm}
-                  onChange={(e) =>
-                    setConfig((prev) => ({
-                      ...prev,
-                      groundClearanceMm: Number(e.target.value),
-                    }))
-                  }
+                  onChange={(e) => {
+                    const newGc = Number(e.target.value);
+                    setConfig((prev) => {
+                      const bodyThickness =
+                        prev.overallDimensionsMm.heightMm - prev.groundClearanceMm;
+                      const nextHeight = Math.max(1050, Math.min(2000, bodyThickness + newGc));
+                      return {
+                        ...prev,
+                        groundClearanceMm: newGc,
+                        overallDimensionsMm: {
+                          ...prev.overallDimensionsMm,
+                          heightMm: nextHeight,
+                        },
+                      };
+                    });
+                  }}
                   className="w-full accent-amber-500 cursor-pointer"
                 />
               </div>

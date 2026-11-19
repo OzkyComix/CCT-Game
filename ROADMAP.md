@@ -121,19 +121,19 @@ src/
 - [x] Algoritmo di calcolo automatico del **Segmento dell'auto** confrontando le dimensioni del pianale con gli standard dell'anno corrente (con soglie dimensionali che crescono a scaglioni ogni $X$ anni).
 
 ### 2.2 Scocca e Sicurezza
-- [ ] **Configuratore Aerodinamico (Downforce vs Drag)**: selezione e regolazione incidenza (gradi) di Splitter/Canard anteriori, Ala posteriore, Fondo piatto/Diffusore ad effetto suolo (sensibile all'altezza da terra) e Aerodinamica Attiva (DRS/Flap mobili che riducono il Cx in rettilineo e massimizzano il carico in curva e staccata).
-- [ ] Selettore delle 8 carrozzerie: `Berlina`, `Coupé`, `Hatchback`, `SUV`, `Crossover`, `Universale`, `Coupé Sportivo`, `Pickup`.
-- [ ] Configurazione materiale della carrozzeria, sicurezza passiva e airbag.
+- [x] **Configuratore Aerodinamico (Downforce vs Drag)**: selezione e regolazione incidenza (gradi) di Splitter/Canard anteriori, Ala posteriore, Fondo piatto/Diffusore ad effetto suolo (sensibile all'altezza da terra) e Aerodinamica Attiva (DRS/Flap mobili che riducono il Cx in rettilineo e massimizzano il carico in curva e staccata).
+- [x] Selettore delle 8 carrozzerie: `Berlina`, `Coupé`, `Hatchback`, `SUV`, `Crossover`, `Universale`, `Coupé Sportivo`, `Pickup`.
+- [x] Configurazione materiale della carrozzeria, sicurezza passiva e airbag.
 
 ### 2.3 Trasmissione, Regolazione Rapporti e 4 Schemi AWD
-- [ ] Selezione di: guida, cambio, numero di marce, sospensione, differenziale, sistema di stabilizzazione (con **soglia di intervento regolabile**) e pinza freno anteriore e posteriore.
-- [ ] **Slider Rapportatura Veicolo**: permettere la modifica e il riadattamento dei singoli rapporti del cambio e del rapporto finale sul singolo veicolo anche senza progettare un cambio da zero.
-- [ ] Calcolo matematico della **Perdita di Trasmissione (Drivetrain Loss %)** tra potenza all'albero e potenza effettiva alle ruote.
-- [ ] Implementazione dei **4 Schemi di Trazione Integrale**:
-  - [ ] 1. `AWD Anteriore On-Demand (Haldex)`
-  - [ ] 2. `AWD Trasversale Performance` ("Finta Posteriore" stile RS3/A45S con Torque Splitter)
-  - [ ] 3. `AWD Longitudinale Permanente`
-  - [ ] 4. `4WD Heavy-Duty con ridotte`
+- [x] Selezione di: guida, cambio, numero di marce, sospensione, differenziale, sistema di stabilizzazione (con **soglia di intervento regolabile**) e pinza freno anteriore e posteriore.
+- [x] **Slider Rapportatura Veicolo**: permettere la modifica e il riadattamento dei singoli rapporti del cambio e del rapporto finale sul singolo veicolo anche senza progettare un cambio da zero.
+- [x] Calcolo matematico della **Perdita di Trasmissione (Drivetrain Loss %)** tra potenza all'albero e potenza effettiva alle ruote.
+- [x] Implementazione dei **4 Schemi di Trazione Integrale**:
+  - [x] 1. `AWD Anteriore On-Demand (Haldex)`
+  - [x] 2. `AWD Trasversale Performance` ("Finta Posteriore" stile RS3/A45S con Torque Splitter)
+  - [x] 3. `AWD Longitudinale Permanente`
+  - [x] 4. `4WD Heavy-Duty con ridotte`
 
 ### 2.4 Assetto Avanzato, Polveri Sottili e Penalità Fisiche
 - [ ] Sblocco e montaggio di: barre antirollio, gabbie roll-cage (in vari materiali) e sospensioni idrauliche, ad aria o attive.

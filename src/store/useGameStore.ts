@@ -15,8 +15,12 @@ import {
 import { CHASSIS_STRUCTURES } from '../data/chassisData';
 import {
   type BatteryPackEntity,
+  type BodyAeroConfig,
+  type BodyAeroMetrics,
   type ChassisEntity,
   type ComponentEntity,
+  type DrivetrainSetupConfig,
+  type DrivetrainSetupMetrics,
   type ElectricMotorEntity,
   type CoupledIceEngineOption,
   type DualCurrencyCost,
@@ -26,6 +30,8 @@ import {
   type WankelEngineSpecs,
   type PriceTier,
   type ReferenceClass,
+  type SavedBodyAero,
+  type SavedDrivetrainSetup,
   type SubBrand,
   type VehicleEntity,
   calculateEstimatedDurabilityKm,
@@ -68,6 +74,8 @@ export interface GameState {
   subBrands: SubBrand[];
   engines: EngineEntity[];
   chassisList: ChassisEntity[];
+  bodyAeroList: SavedBodyAero[];
+  drivetrainSetups: SavedDrivetrainSetup[];
   components: ComponentEntity[];
   vehicles: VehicleEntity[];
   transactionLog: TransactionLogEntry[];
@@ -102,6 +110,12 @@ export interface GameState {
   saveElectricMotorToLibrary: (motor: ElectricMotorEntity) => DualCurrencyGateResult;
   saveBatteryPackToLibrary: (pack: BatteryPackEntity) => DualCurrencyGateResult;
   saveChassisToDatabase: (chassis: ChassisEntity) => DualCurrencyGateResult;
+  addBodyAero: (bodyAero: SavedBodyAero) => DualCurrencyGateResult;
+  updateBodyAero: (id: string, config: BodyAeroConfig, metrics: BodyAeroMetrics) => DualCurrencyGateResult;
+  deleteBodyAero: (id: string) => void;
+  addDrivetrainSetup: (setup: SavedDrivetrainSetup) => DualCurrencyGateResult;
+  updateDrivetrainSetup: (id: string, config: DrivetrainSetupConfig, metrics: DrivetrainSetupMetrics) => DualCurrencyGateResult;
+  deleteDrivetrainSetup: (id: string) => void;
 
   // Azioni Database Modulare
   addCustomComponent: (params: {
@@ -280,7 +294,197 @@ const initialWankelTelemetry = simulateWankelEngineDyno({
   nativeOrientation: initialWankelSpecs.nativeOrientation ?? 'Longitudinale',
 });
 
+const buildSeedPistonEngine = (opts: {
+  id: string;
+  name: string;
+  codeName: string;
+  createdYear: number;
+  priceTier: PriceTier;
+  referenceClass: ReferenceClass;
+  architecture: PistonEngineSpecs['architecture'];
+  cylinderCount: number;
+  bankAngleDeg: number;
+  boreMm: number;
+  strokeMm: number;
+  compressionRatio: number;
+  manualRedlineRpm: number;
+  nativeOrientation: 'Trasversale' | 'Longitudinale';
+  turboType: PistonEngineSpecs['turboType'];
+  turboCountConfig: PistonEngineSpecs['turboCountConfig'];
+  boostPressureBar: number;
+  turboPosition: PistonEngineSpecs['turboPosition'];
+  dimensionsMm: { lengthMm: number; widthMm: number; heightMm: number };
+  capitalCost: number;
+  rdCost: number;
+}): EngineEntity => {
+  const specs: PistonEngineSpecs = {
+    ...initialPistonSpecs,
+    architecture: opts.architecture,
+    cylinders: opts.cylinderCount,
+    bankAngleDeg: opts.bankAngleDeg,
+    boreMm: opts.boreMm,
+    strokeMm: opts.strokeMm,
+    compressionRatio: opts.compressionRatio,
+    manualRedlineRpm: opts.manualRedlineRpm,
+    intendedOrientation: opts.nativeOrientation,
+    nativeOrientation: opts.nativeOrientation,
+    turboType: opts.turboType,
+    turboCountConfig: opts.turboCountConfig,
+    boostPressureBar: opts.boostPressureBar,
+    turboPosition: opts.turboPosition,
+  };
+  const telemetry = simulatePistonEngineDyno({
+    ...specs,
+    priceTier: opts.priceTier,
+    referenceClass: opts.referenceClass,
+    bankAngleDeg: opts.bankAngleDeg,
+    compressionRatio: opts.compressionRatio,
+    turboCountConfig: opts.turboCountConfig ?? 'SingleTurbo',
+    turboBearingType: specs.turboBearingType ?? 'BallBearing',
+    turboArRatio: specs.turboArRatio ?? 0.65,
+    turboStagesArRatios: specs.turboStagesArRatios ?? [0.65, 0.65],
+    boostPressureBar: opts.boostPressureBar,
+    manualRedlineRpm: opts.manualRedlineRpm,
+    intendedOrientation: opts.nativeOrientation,
+    nativeOrientation: opts.nativeOrientation,
+    blockMaterialId: specs.blockMaterialId!,
+    headMaterialId: specs.headMaterialId!,
+    pistonTypeId: specs.pistonTypeId!,
+    conrodTypeId: specs.conrodTypeId!,
+    crankshaftTypeId: specs.crankshaftTypeId!,
+    camshaftTypeId: specs.camshaftTypeId!,
+    fuelSystemId: specs.fuelSystemId!,
+    intakeSystemId: specs.intakeSystemId!,
+    exhaustManifoldId: specs.exhaustManifoldId!,
+  });
+  return {
+    id: opts.id,
+    name: opts.name,
+    codeName: opts.codeName,
+    ownerSubBrandId: 'sb-officine-milano',
+    createdYear: opts.createdYear,
+    propulsionType: 'Piston_1A',
+    taxonomy: {
+      priceTier: opts.priceTier,
+      referenceClass: opts.referenceClass,
+      materialStress: {
+        materialName: 'Lega Alluminio OEM',
+        materialResistanceFactor: 1.25,
+        mechanicalStressFactor: 1.0,
+      },
+      estimatedDurabilityKm: calculateEstimatedDurabilityKm(
+        opts.priceTier,
+        opts.referenceClass,
+        1.25,
+        1.0,
+      ),
+    },
+    dimensionsMm: opts.dimensionsMm,
+    pistonSpecs: specs,
+    telemetry,
+    b2bSaleEnabled: true,
+    b2bUnitsSold: 0,
+    developmentCost: {
+      capitalCost: opts.capitalCost,
+      rdCost: opts.rdCost,
+      minYear: opts.createdYear,
+    },
+  };
+};
+
 const initialEngines: EngineEntity[] = [
+  buildSeedPistonEngine({
+    id: 'eng-seed-12-i4-65',
+    name: '1.2L I4 Compatto (65 CV)',
+    codeName: 'FIRE-1242',
+    createdYear: 2005,
+    priceTier: 'Economica',
+    referenceClass: 'Normale',
+    architecture: 'Inline',
+    cylinderCount: 4,
+    bankAngleDeg: 0,
+    boreMm: 70.8,
+    strokeMm: 78.8,
+    compressionRatio: 10.2,
+    manualRedlineRpm: 5800,
+    nativeOrientation: 'Trasversale',
+    turboType: 'NaturallyAspirated',
+    turboCountConfig: 'SingleTurbo',
+    boostPressureBar: 0,
+    turboPosition: 'Front',
+    dimensionsMm: { lengthMm: 390, widthMm: 455, heightMm: 575 },
+    capitalCost: 9_000_000,
+    rdCost: 60,
+  }),
+  buildSeedPistonEngine({
+    id: 'eng-seed-20-i4-turbo-280',
+    name: '2.0L Turbo I4 (280 CV)',
+    codeName: 'TBI-2000',
+    createdYear: 2016,
+    priceTier: 'Media',
+    referenceClass: 'Sport',
+    architecture: 'Inline',
+    cylinderCount: 4,
+    bankAngleDeg: 0,
+    boreMm: 84.0,
+    strokeMm: 90.0,
+    compressionRatio: 9.6,
+    manualRedlineRpm: 6800,
+    nativeOrientation: 'Trasversale',
+    turboType: 'TwinScroll',
+    turboCountConfig: 'SingleTurbo',
+    boostPressureBar: 1.35,
+    turboPosition: 'Lateral',
+    dimensionsMm: { lengthMm: 445, widthMm: 535, heightMm: 615 },
+    capitalCost: 21_000_000,
+    rdCost: 150,
+  }),
+  buildSeedPistonEngine({
+    id: 'eng-seed-30-i6-biturbo-420',
+    name: '3.0L I6 Biturbo (420 CV)',
+    codeName: 'S55-3000T',
+    createdYear: 2018,
+    priceTier: 'Premium',
+    referenceClass: 'Sport',
+    architecture: 'Inline',
+    cylinderCount: 6,
+    bankAngleDeg: 0,
+    boreMm: 84.0,
+    strokeMm: 89.6,
+    compressionRatio: 9.8,
+    manualRedlineRpm: 7200,
+    nativeOrientation: 'Longitudinale',
+    turboType: 'TwinScroll',
+    turboCountConfig: 'TwinTurbo',
+    boostPressureBar: 1.25,
+    turboPosition: 'Lateral',
+    dimensionsMm: { lengthMm: 760, widthMm: 575, heightMm: 650 },
+    capitalCost: 34_000_000,
+    rdCost: 260,
+  }),
+  buildSeedPistonEngine({
+    id: 'eng-seed-40-v8-biturbo-620',
+    name: '4.0L V8 Biturbo (620 CV)',
+    codeName: 'M178-V8TT',
+    createdYear: 2020,
+    priceTier: 'Lusso',
+    referenceClass: 'Sport',
+    architecture: 'V',
+    cylinderCount: 8,
+    bankAngleDeg: 90,
+    boreMm: 86.0,
+    strokeMm: 86.0,
+    compressionRatio: 9.5,
+    manualRedlineRpm: 7500,
+    nativeOrientation: 'Longitudinale',
+    turboType: 'TwinScroll',
+    turboCountConfig: 'TwinTurbo',
+    boostPressureBar: 1.45,
+    turboPosition: 'HotV',
+    dimensionsMm: { lengthMm: 645, widthMm: 725, heightMm: 665 },
+    capitalCost: 52_000_000,
+    rdCost: 420,
+  }),
   {
     id: 'eng-v6-2900-biturbo',
     name: '2.9L V6 90° Bi-Turbo Hot-V',
@@ -629,13 +833,16 @@ export const useGameStore = create<GameState>((set, get) => ({
   currentYear: 2016,
   currentMonth: 4,
   resources: {
-    financialCapital: 125_000_000,
-    rdPoints: 840,
+    // Valori sandbox pre-Fase 5.1 per test completi di tutte le combinazioni
+    financialCapital: 1_000_000_000,
+    rdPoints: 5_000,
   },
   unlockedEnginePartIds: defaultUnlockedParts,
   subBrands: initialSubBrands,
   engines: initialEngines,
   chassisList: initialChassis,
+  bodyAeroList: [],
+  drivetrainSetups: [],
   components: initialComponents,
   vehicles: initialVehicles,
   livePistonDraft: {
@@ -973,4 +1180,415 @@ export const useGameStore = create<GameState>((set, get) => ({
         c.id === componentId ? { ...c, b2bSaleEnabled: !c.b2bSaleEnabled } : c,
       ),
     })),
+
+  addBodyAero: (bodyAero) => {
+    const validation = validateBodyAeroSave(bodyAero.config, bodyAero.metrics, get());
+    if (!validation.ok) {
+      const { resources, currentYear } = get();
+      const missingCapital = Math.max(
+        0,
+        bodyAero.metrics.developmentCost.capitalCost - resources.financialCapital,
+      );
+      const missingRdPoints = Math.max(
+        0,
+        bodyAero.metrics.developmentCost.rdCost - resources.rdPoints,
+      );
+      const missingYear =
+        bodyAero.metrics.developmentCost.minYear !== undefined
+          ? currentYear < bodyAero.metrics.developmentCost.minYear
+          : false;
+      return {
+        allowed: false,
+        missingCapital,
+        missingRdPoints,
+        missingYear,
+        reason: validation.reasons.join(' | '),
+      };
+    }
+
+    const gate = get().spendDualCurrency(
+      `Omologazione Carrozzeria & Aero: ${bodyAero.name}`,
+      bodyAero.metrics.developmentCost,
+    );
+    if (!gate.allowed) return gate;
+
+    const savedEntry: SavedBodyAero = {
+      ...bodyAero,
+      paidCapitalCost: bodyAero.metrics.developmentCost.capitalCost,
+      paidRdCost: bodyAero.metrics.developmentCost.rdCost,
+    };
+
+    set((state) => ({
+      bodyAeroList: [savedEntry, ...state.bodyAeroList],
+    }));
+    return gate;
+  },
+
+  updateBodyAero: (id, config, metrics) => {
+    const existing = get().bodyAeroList.find((item) => item.id === id);
+    const existingPaid = existing
+      ? {
+          paidCapitalCost: existing.paidCapitalCost ?? existing.metrics.developmentCost.capitalCost,
+          paidRdCost: existing.paidRdCost ?? existing.metrics.developmentCost.rdCost,
+        }
+      : undefined;
+
+    const validation = validateBodyAeroSave(config, metrics, get(), existingPaid);
+    if (!validation.ok) {
+      const { resources, currentYear } = get();
+      const incCost = getIncrementalBodyAeroCost(metrics.developmentCost, existingPaid);
+      const missingCapital = Math.max(0, incCost.capitalCost - resources.financialCapital);
+      const missingRdPoints = Math.max(0, incCost.rdCost - resources.rdPoints);
+      const missingYear =
+        metrics.developmentCost.minYear !== undefined
+          ? currentYear < metrics.developmentCost.minYear
+          : false;
+      return {
+        allowed: false,
+        missingCapital,
+        missingRdPoints,
+        missingYear,
+        reason: validation.reasons.join(' | '),
+      };
+    }
+
+    const incrementalCost = getIncrementalBodyAeroCost(metrics.developmentCost, existingPaid);
+    const gate = get().spendDualCurrency(
+      `Aggiornamento Carrozzeria & Aero: ${config.name}`,
+      incrementalCost,
+    );
+    if (!gate.allowed) return gate;
+
+    set((state) => ({
+      bodyAeroList: state.bodyAeroList.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              name: config.name.trim(),
+              chassisId: config.chassisId,
+              createdYear: config.year,
+              paidCapitalCost: Math.max(
+                existingPaid?.paidCapitalCost ?? 0,
+                metrics.developmentCost.capitalCost,
+              ),
+              paidRdCost: Math.max(
+                existingPaid?.paidRdCost ?? 0,
+                metrics.developmentCost.rdCost,
+              ),
+              config,
+              metrics,
+            }
+          : item,
+      ),
+    }));
+    return gate;
+  },
+
+  deleteBodyAero: (id) =>
+    set((state) => ({
+      bodyAeroList: state.bodyAeroList.filter((item) => item.id !== id),
+    })),
+
+  addDrivetrainSetup: (setup) => {
+    const validation = validateDrivetrainSetupSave(setup.config, setup.metrics, get());
+    if (!validation.ok) {
+      const { resources, currentYear } = get();
+      const missingCapital = Math.max(
+        0,
+        setup.metrics.developmentCost.capitalCost - resources.financialCapital,
+      );
+      const missingRdPoints = Math.max(
+        0,
+        setup.metrics.developmentCost.rdCost - resources.rdPoints,
+      );
+      const missingYear =
+        setup.metrics.developmentCost.minYear !== undefined
+          ? currentYear < setup.metrics.developmentCost.minYear
+          : false;
+      return {
+        allowed: false,
+        missingCapital,
+        missingRdPoints,
+        missingYear,
+        reason: validation.reasons.join(' | '),
+      };
+    }
+
+    const gate = get().spendDualCurrency(
+      `Omologazione Trasmissione & Dinamica: ${setup.name}`,
+      setup.metrics.developmentCost,
+    );
+    if (!gate.allowed) return gate;
+
+    const savedEntry: SavedDrivetrainSetup = {
+      ...setup,
+      paidCapitalCost: setup.metrics.developmentCost.capitalCost,
+      paidRdCost: setup.metrics.developmentCost.rdCost,
+    };
+
+    set((state) => ({
+      drivetrainSetups: [savedEntry, ...state.drivetrainSetups],
+    }));
+    return gate;
+  },
+
+  updateDrivetrainSetup: (id, config, metrics) => {
+    const existing = get().drivetrainSetups.find((item) => item.id === id);
+    const existingPaid = existing
+      ? {
+          paidCapitalCost: existing.paidCapitalCost ?? existing.metrics.developmentCost.capitalCost,
+          paidRdCost: existing.paidRdCost ?? existing.metrics.developmentCost.rdCost,
+        }
+      : undefined;
+
+    const validation = validateDrivetrainSetupSave(
+      config,
+      metrics,
+      get(),
+      existingPaid,
+      existing?.config,
+    );
+    if (!validation.ok) {
+      const { resources, currentYear } = get();
+      const incCost = getIncrementalDrivetrainCost(
+        config,
+        metrics.developmentCost,
+        existingPaid,
+        existing?.config,
+      );
+      const missingCapital = Math.max(0, incCost.capitalCost - resources.financialCapital);
+      const missingRdPoints = Math.max(0, incCost.rdCost - resources.rdPoints);
+      const missingYear =
+        metrics.developmentCost.minYear !== undefined
+          ? currentYear < metrics.developmentCost.minYear
+          : false;
+      return {
+        allowed: false,
+        missingCapital,
+        missingRdPoints,
+        missingYear,
+        reason: validation.reasons.join(' | '),
+      };
+    }
+
+    const incrementalCost = getIncrementalDrivetrainCost(
+      config,
+      metrics.developmentCost,
+      existingPaid,
+      existing?.config,
+    );
+    const gate = get().spendDualCurrency(
+      `Aggiornamento Trasmissione & Dinamica: ${config.name}`,
+      incrementalCost,
+    );
+    if (!gate.allowed) return gate;
+
+    set((state) => ({
+      drivetrainSetups: state.drivetrainSetups.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              name: config.name.trim(),
+              chassisId: config.chassisId,
+              engineId: config.engineId,
+              createdYear: config.year,
+              paidCapitalCost: Math.max(
+                existingPaid?.paidCapitalCost ?? 0,
+                metrics.developmentCost.capitalCost,
+              ),
+              paidRdCost: Math.max(
+                existingPaid?.paidRdCost ?? 0,
+                metrics.developmentCost.rdCost,
+              ),
+              config,
+              metrics,
+            }
+          : item,
+      ),
+    }));
+    return gate;
+  },
+
+  deleteDrivetrainSetup: (id) =>
+    set((state) => ({
+      drivetrainSetups: state.drivetrainSetups.filter((item) => item.id !== id),
+    })),
 }));
+
+export function getIncrementalBodyAeroCost(
+  developmentCost: DualCurrencyCost,
+  existingPaid?: { paidCapitalCost: number; paidRdCost: number },
+): DualCurrencyCost {
+  if (!existingPaid) return developmentCost;
+  const deltaCapital = Math.max(0, developmentCost.capitalCost - existingPaid.paidCapitalCost);
+  const deltaRd = Math.max(0, developmentCost.rdCost - existingPaid.paidRdCost);
+  const revisionCapital = Math.round(developmentCost.capitalCost * 0.05);
+  const revisionRd = Math.max(1, Math.round(developmentCost.rdCost * 0.05));
+  return {
+    capitalCost: deltaCapital + revisionCapital,
+    rdCost: deltaRd + revisionRd,
+    minYear: developmentCost.minYear,
+  };
+}
+
+/**
+ * Validazione deterministica pre-salvataggio per la Fase 2.2.
+ * Verifica nome, esistenza pianale 2.1, anno minimo tecnologia e Doppia Valuta ($ + Punti R&D).
+ * In modalità modifica (existingPaid), verifica solo il delta positivo + 5% di revisione.
+ */
+export function validateBodyAeroSave(
+  config: BodyAeroConfig,
+  metrics: BodyAeroMetrics,
+  state: Pick<GameState, 'currentYear' | 'resources' | 'chassisList'>,
+  existingPaid?: { paidCapitalCost: number; paidRdCost: number },
+): { ok: boolean; reasons: string[] } {
+  const reasons: string[] = [];
+
+  if (!config.name || config.name.trim().length === 0) {
+    reasons.push('Nome scocca mancante: inserire un nome valido.');
+  }
+
+  if (!config.chassisId || !state.chassisList.some((c) => c.id === config.chassisId)) {
+    reasons.push('Pianale base (2.1) non valido o assente nel database.');
+  }
+
+  const minYear = metrics.developmentCost.minYear;
+  if (minYear !== undefined && state.currentYear < minYear) {
+    reasons.push(
+      `Anno di gioco (${state.currentYear}) precedente alla disponibilità tecnologica (${minYear}).`,
+    );
+  }
+
+  const requiredCost = getIncrementalBodyAeroCost(metrics.developmentCost, existingPaid);
+
+  const missingCapital = Math.max(0, requiredCost.capitalCost - state.resources.financialCapital);
+  if (missingCapital > 0) {
+    reasons.push(`Capitale insufficiente: mancano $${missingCapital.toLocaleString('it-IT')}.`);
+  }
+
+  const missingRdPoints = Math.max(0, requiredCost.rdCost - state.resources.rdPoints);
+  if (missingRdPoints > 0) {
+    reasons.push(`Punti R&D insufficienti: mancano ${missingRdPoints} Punti R&D.`);
+  }
+
+  return {
+    ok: reasons.length === 0,
+    reasons,
+  };
+}
+
+export function isDrivetrainTuningOnly(
+  nextConfig: DrivetrainSetupConfig,
+  prevConfig?: DrivetrainSetupConfig,
+): boolean {
+  if (!prevConfig) return false;
+  return (
+    nextConfig.chassisId === prevConfig.chassisId &&
+    nextConfig.engineId === prevConfig.engineId &&
+    nextConfig.year === prevConfig.year &&
+    nextConfig.drivetrainType === prevConfig.drivetrainType &&
+    nextConfig.awdScheme === prevConfig.awdScheme &&
+    nextConfig.transmissionType === prevConfig.transmissionType &&
+    (nextConfig.gearboxStrengthTier ?? 'standard') ===
+      (prevConfig.gearboxStrengthTier ?? 'standard') &&
+    nextConfig.gearCount === prevConfig.gearCount &&
+    nextConfig.differentialType === prevConfig.differentialType &&
+    nextConfig.steeringType === prevConfig.steeringType &&
+    nextConfig.rearWheelSteering === prevConfig.rearWheelSteering &&
+    Boolean(nextConfig.progressiveSteering) === Boolean(prevConfig.progressiveSteering) &&
+    Boolean(nextConfig.speedSensitiveSteering) === Boolean(prevConfig.speedSensitiveSteering) &&
+    nextConfig.frontSuspension === prevConfig.frontSuspension &&
+    nextConfig.rearSuspension === prevConfig.rearSuspension &&
+    nextConfig.stabilityControlType === prevConfig.stabilityControlType &&
+    nextConfig.absType === prevConfig.absType &&
+    nextConfig.tcsType === prevConfig.tcsType &&
+    nextConfig.escType === prevConfig.escType &&
+    Boolean(nextConfig.hasDriveModeSelector) === Boolean(prevConfig.hasDriveModeSelector) &&
+    nextConfig.frontCaliper === prevConfig.frontCaliper &&
+    nextConfig.frontDiscType === prevConfig.frontDiscType &&
+    nextConfig.frontDiscMm === prevConfig.frontDiscMm &&
+    nextConfig.rearCaliper === prevConfig.rearCaliper &&
+    nextConfig.rearDiscType === prevConfig.rearDiscType &&
+    nextConfig.rearDiscMm === prevConfig.rearDiscMm
+  );
+}
+
+export function getIncrementalDrivetrainCost(
+  config: DrivetrainSetupConfig,
+  developmentCost: DualCurrencyCost,
+  existingPaid?: { paidCapitalCost: number; paidRdCost: number },
+  existingConfig?: DrivetrainSetupConfig,
+): DualCurrencyCost {
+  if (!existingPaid) return developmentCost;
+  if (isDrivetrainTuningOnly(config, existingConfig)) {
+    return {
+      capitalCost: 25_000,
+      rdCost: 1,
+      minYear: developmentCost.minYear,
+    };
+  }
+  return getIncrementalBodyAeroCost(developmentCost, existingPaid);
+}
+
+/**
+ * Validazione deterministica pre-salvataggio per la Fase 2.3 (Trasmissione & Dinamica).
+ * Verifica nome, pianale 2.1, motopropulsore 1.x, compatibilità fisica 2.1<->2.3,
+ * anno minimo tecnologia e Doppia Valuta ($ + Punti R&D, incrementale se existingPaid).
+ */
+export function validateDrivetrainSetupSave(
+  config: DrivetrainSetupConfig,
+  metrics: DrivetrainSetupMetrics,
+  state: Pick<GameState, 'currentYear' | 'resources' | 'chassisList' | 'engines' | 'savedElectricMotors'>,
+  existingPaid?: { paidCapitalCost: number; paidRdCost: number },
+  existingConfig?: DrivetrainSetupConfig,
+): { ok: boolean; reasons: string[] } {
+  const reasons: string[] = [];
+
+  if (!config.name || config.name.trim().length === 0) {
+    reasons.push('Nome setup trasmissione mancante.');
+  }
+
+  if (!config.chassisId || !state.chassisList.some((c) => c.id === config.chassisId)) {
+    reasons.push('Pianale base (2.1) non valido o assente nel database.');
+  }
+
+  const hasEngine =
+    state.engines.some((e) => e.id === config.engineId) ||
+    state.savedElectricMotors.some((m) => m.id === config.engineId);
+  if (!config.engineId || !hasEngine) {
+    reasons.push('Motopropulsore (Fase 1) non valido o assente nel database.');
+  }
+
+  if (!metrics.isCompatibleWithChassis) {
+    reasons.push(...metrics.compatibilityErrors);
+  }
+
+  const minYear = metrics.developmentCost.minYear;
+  if (minYear !== undefined && state.currentYear < minYear) {
+    reasons.push(
+      `Anno di gioco (${state.currentYear}) precedente alla disponibilità tecnologica (${minYear}).`,
+    );
+  }
+
+  const requiredCost = getIncrementalDrivetrainCost(
+    config,
+    metrics.developmentCost,
+    existingPaid,
+    existingConfig,
+  );
+
+  const missingCapital = Math.max(0, requiredCost.capitalCost - state.resources.financialCapital);
+  if (missingCapital > 0) {
+    reasons.push(`Capitale insufficiente: mancano $${missingCapital.toLocaleString('it-IT')}.`);
+  }
+
+  const missingRdPoints = Math.max(0, requiredCost.rdCost - state.resources.rdPoints);
+  if (missingRdPoints > 0) {
+    reasons.push(`Punti R&D insufficienti: mancano ${missingRdPoints} Punti R&D.`);
+  }
+
+  return {
+    ok: reasons.length === 0,
+    reasons,
+  };
+}

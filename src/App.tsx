@@ -8,9 +8,13 @@ import {
   FlaskConical,
   Layers,
   RotateCw,
+  Settings2,
+  Wind,
   Zap,
 } from 'lucide-react';
+import { BodyAeroDesigner22 } from './components/chassis/BodyAeroDesigner22';
 import { ChassisDesigner21 } from './components/chassis/ChassisDesigner21';
+import { DrivetrainDesigner23 } from './components/chassis/DrivetrainDesigner23';
 import { ElectricHybridDesigner1C } from './components/engine-lab/ElectricHybridDesigner1C';
 import { PistonEngineDesigner1A } from './components/engine-lab/PistonEngineDesigner1A';
 import { WankelEngineDesigner1B } from './components/engine-lab/WankelEngineDesigner1B';
@@ -21,6 +25,8 @@ type ActiveSection =
   | 'engine-lab-1b'
   | 'engine-lab-1c'
   | 'chassis-21'
+  | 'chassis-22'
+  | 'chassis-23'
   | 'database-overview';
 
 export const App: React.FC = () => {
@@ -31,6 +37,8 @@ export const App: React.FC = () => {
     subBrands,
     engines,
     chassisList,
+    bodyAeroList,
+    drivetrainSetups,
     components,
     vehicles,
     transactionLog,
@@ -41,6 +49,8 @@ export const App: React.FC = () => {
   } = useGameStore();
 
   const [activeSection, setActiveSection] = useState<ActiveSection>('engine-lab-1a');
+  const [selectedBodyAeroId, setSelectedBodyAeroId] = useState<string | null>(null);
+  const [selectedDrivetrainId, setSelectedDrivetrainId] = useState<string | null>(null);
 
   const monthNames = [
     'Gennaio',
@@ -125,6 +135,30 @@ export const App: React.FC = () => {
             >
               <Layers className="w-4 h-4" />
               <span>Fase 2.1: Pianali ({chassisList.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveSection('chassis-22')}
+              className={`px-3.5 py-2 rounded-lg border flex items-center gap-2 transition cursor-pointer ${
+                activeSection === 'chassis-22'
+                  ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300 font-bold'
+                  : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+              }`}
+            >
+              <Wind className="w-4 h-4" />
+              <span>Fase 2.2: Scocca & Aero ({bodyAeroList.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveSection('chassis-23')}
+              className={`px-3.5 py-2 rounded-lg border flex items-center gap-2 transition cursor-pointer ${
+                activeSection === 'chassis-23'
+                  ? 'bg-indigo-500/20 border-indigo-500 text-indigo-300 font-bold'
+                  : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+              }`}
+            >
+              <Settings2 className="w-4 h-4" />
+              <span>Fase 2.3: Trasmissione & Assetto ({drivetrainSetups.length})</span>
             </button>
             <button
               type="button"
@@ -214,6 +248,19 @@ export const App: React.FC = () => {
           />
         ) : activeSection === 'chassis-21' ? (
           <ChassisDesigner21 />
+        ) : activeSection === 'chassis-22' ? (
+          <BodyAeroDesigner22
+            selectedBodyAeroId={selectedBodyAeroId}
+            onClearSelectedBodyAero={() => setSelectedBodyAeroId(null)}
+            onNavigateToChassis21={() => setActiveSection('chassis-21')}
+          />
+        ) : activeSection === 'chassis-23' ? (
+          <DrivetrainDesigner23
+            selectedDrivetrainId={selectedDrivetrainId}
+            onClearSelectedDrivetrain={() => setSelectedDrivetrainId(null)}
+            onNavigateToChassis21={() => setActiveSection('chassis-21')}
+            onNavigateToEngines={() => setActiveSection('engine-lab-1a')}
+          />
         ) : (
           <div className="space-y-6">
             {/* Database Relazionale Modulare: Le 5 Entità Indipendenti */}
@@ -293,6 +340,57 @@ export const App: React.FC = () => {
                       </div>
                     </div>
                   ))}
+                  {bodyAeroList.length > 0 && (
+                    <div className="pt-2 border-t border-slate-800 space-y-1.5">
+                      <div className="text-cyan-400 font-bold uppercase text-[10px] flex justify-between">
+                        <span>2.2 Scocche & Aero</span>
+                        <span>({bodyAeroList.length})</span>
+                      </div>
+                      {bodyAeroList.map((ba) => (
+                        <button
+                          key={ba.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedBodyAeroId(ba.id);
+                            setActiveSection('chassis-22');
+                          }}
+                          className="w-full text-left p-2 rounded bg-slate-900 hover:bg-slate-800/80 border border-slate-800 hover:border-cyan-500/40 space-y-0.5 transition cursor-pointer"
+                        >
+                          <div className="font-bold text-cyan-200 truncate">{ba.name}</div>
+                          <div className="text-[10px] text-slate-400">
+                            {ba.config.bodyStyle} • Cx {ba.metrics.cxHighDownforce.toFixed(2)} •{' '}
+                            {ba.metrics.euroNcapStars}★
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {drivetrainSetups.length > 0 && (
+                    <div className="pt-2 border-t border-slate-800 space-y-1.5">
+                      <div className="text-indigo-400 font-bold uppercase text-[10px] flex justify-between">
+                        <span>2.3 Trasmissioni & Assetto</span>
+                        <span>({drivetrainSetups.length})</span>
+                      </div>
+                      {drivetrainSetups.map((ds) => (
+                        <button
+                          key={ds.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedDrivetrainId(ds.id);
+                            setActiveSection('chassis-23');
+                          }}
+                          className="w-full text-left p-2 rounded bg-slate-900 hover:bg-slate-800/80 border border-slate-800 hover:border-indigo-500/40 space-y-0.5 transition cursor-pointer"
+                        >
+                          <div className="font-bold text-indigo-200 truncate">{ds.name}</div>
+                          <div className="text-[10px] text-slate-400">
+                            {ds.config.drivetrainType} • {ds.config.gearCount}M • Loss{' '}
+                            {ds.metrics.drivetrainLossPercent.toFixed(1)}% •{' '}
+                            {ds.metrics.wheelPeakPowerHp} WHP
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* 3. Motori */}
